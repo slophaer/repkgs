@@ -251,10 +251,14 @@ let
       ++ extraParts;
       runtimes = if given then null else run [ ] "runtimes" { sysroot = sysroot base; };
       full = sysroot (base ++ [ runtimes ]);
-      cc = run [ ] "cc" ({
-        sysroot = full;
-        libcOut = libc;
-      } // ccArgs);
+      cc = run [ ] "cc" (
+        {
+          sysroot = full;
+          libcOut = libc;
+        }
+        // (if runtimes == null then { } else { runtimesOut = runtimes; })
+        // ccArgs
+      );
     in
     {
       inherit
