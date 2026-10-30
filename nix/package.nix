@@ -5,6 +5,8 @@
 {
   platform,
   toolchain,
+  # the libc output: PT_INTERP names it directly, not through the sysroot's symlinks
+  libcOut,
   launch,
   dlaudit,
   buildSystems,
@@ -19,6 +21,8 @@
 }:
 let
   elf = platform.binfmt == "elf";
+  # ld.so lives in the libc output; the sysroot only links to it and would join every closure
+  interpRoot = if elf then libcOut else toolchain.sysroot;
   inherit (lib)
     join
     lines
@@ -107,9 +111,9 @@ let
         hardening
         ;
       inherit (toolchain) sysroot;
-      probe = if platform.cross then "${toolchain.sysroot}/lib/${platform.interp}" else "";
+      probe = if platform.cross then "${interpRoot}/lib/${platform.interp}" else "";
       # `prebuilt`: upstream ELFs get our dynamic linker implanted (true) or via launch ("ldso")
-      interp = "${toolchain.sysroot}/lib/${platform.interp}";
+      interp = "${interpRoot}/lib/${platform.interp}";
       launch =
         if elf then
           "${launch}/bin/launch"

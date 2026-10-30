@@ -40,6 +40,7 @@ let
         [ ];
   };
   toolchain = stage.cc;
+  libcOut = stage.libc;
   launch = stage.launch or null;
   dlaudit = stage.dlaudit or null;
   buildPkgs =
@@ -100,6 +101,7 @@ let
     relocTools = [ buildPkgs.formatelf ];
     inherit
       toolchain
+      libcOut
       launch
       dlaudit
       buildSystems
