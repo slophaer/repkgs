@@ -254,4 +254,16 @@ in
     tools = [ buildPkgs.formatelf ] ++ baseTools.bootstrap;
     tree = ../builder;
   };
+  wrap = import ./wrap.nix {
+    inherit baseTools;
+    platform = plat;
+    inherit launch;
+    nu = bootstrap.seed;
+  };
+  closure = import ./closure.nix {
+    inherit baseTools;
+    platform = plat;
+    inherit launch;
+    nu = bootstrap.seed;
+  };
 }
