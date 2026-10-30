@@ -63,5 +63,21 @@ mapAttrs (
       else
         { }
     )
+    // (
+      # nix/wrap.nix: the wrapped output's name carries the version, `wraps` names the package
+      if name == "wrap" then
+        let
+          inner = set.pkgs.test-tz;
+          wrapped = set.wrap { package = inner; };
+        in
+        assert wrapped.wraps == inner && wrapped.version == inner.version && wrapped.pname == inner.pname;
+        {
+          inherit wrapped;
+          wrappedName = wrapped.name;
+          wrappedWant = "${inner.pname}-${inner.version}-wrap";
+        }
+      else
+        { }
+    )
   )
 ) tests
