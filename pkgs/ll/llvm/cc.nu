@@ -44,7 +44,8 @@ def elf-policy [out: string, sysroot: string]: nothing -> record {
   ] | str join "\n" | save stub.ld
   x (lld) -pie --no-dynamic-linker -e __reloc_start -T stub.ld reloc_stub.o -o reloc_stub.elf
   x llvm-objcopy -O binary -j .text reloc_stub.elf $"($out)/lib/reloc_stub.bin"
-  {libc: $sysroot, interp: $env.interp, crt: $"($out)/lib/crt_interp.o", runtimes: $"($sysroot)/lib"}
+  # the libc output holds ld.so and libc.so.6; stage0/1 toolchains have no separate one
+  {libc: ($env.libcOut? | default $sysroot), interp: $env.interp, crt: $"($out)/lib/crt_interp.o", runtimes: $"($sysroot)/lib"}
 }
 
 # hello.c and hello.cc through the finished wrapper. Run only when the target is the build machine

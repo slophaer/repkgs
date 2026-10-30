@@ -36,7 +36,10 @@ def patched-source []: nothing -> path {
 # CXX=false: a working c++ would make the build compile a C++ test helper against our headers.
 # The link flags sit in no-unused-arguments because configure probes with `-Werror -S`
 def configure [src: path, rt: string, sh: path]: nothing -> nothing {
-  let cc = $"clang (target | str join ' ') -resource-dir=($rt) --start-no-unused-arguments -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld --end-no-unused-arguments"
+  # -isystem dirs of the headers and compiler-rt would otherwise reach the debug info of every
+  # library and make libc reference them: they are build inputs, not run-time dependencies
+  let maps = ([$rt $env.linuxHeaders] | each {|d| $"-ffile-prefix-map=($d)=/build-input" } | str join ' ')
+  let cc = $"clang (target | str join ' ') ($maps) -resource-dir=($rt) --start-no-unused-arguments -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld --end-no-unused-arguments"
   let vars = {CONFIG_SHELL: $sh, CC: $cc, CXX: "false", BUILD_CC: "cc", LDFLAGS: $"-L($rt)/lib/($env.clangTarget)"} | merge $BINUTILS
   "with-clang = yes\n" | save configparms # sysdeps Makefiles branch on it
   with-env $vars {
