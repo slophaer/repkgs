@@ -12,13 +12,18 @@
 # PATH names the store dirs holding its DLLs (also the reference Nix sees).
 
 use core.nu *
+use exports.nu [dep-closure]
 
 # The env part of a package's launch records, the same for all of its bin/ entries:
-# PATH gets every dependency that has a bin/, and each dependency's `exports.env` become
-# defaults. Empty record when there is nothing to set.
+# PATH gets every direct dependency that has a bin/ (propagated packages are libraries, not
+# runtime tools). Each dependency's `exports.env`, including transitively propagated ones,
+# become defaults. Direct deps override propagated values for the same key.
 def runtime-env [deps: list<string>, out: string]: nothing -> record {
-  let exported = ($deps | each {|d| (exports-of $d).env } | reduce -f {} {|it, acc| $acc | merge $it }
+  # env: follow propagate transitively. Reverse so direct deps come last and win on conflict.
+  let closure = (dep-closure $deps)
+  let exported = ($closure | reverse | each {|d| $d.env } | reduce -f {} {|it, acc| $acc | merge $it }
     | items {|k, v| [$k {default: (storerel $v $out)}] } | into record)
+  # PATH: direct deps only, not propagated (propagate is for libraries, not bin/ tools)
   let path = ($deps | where { $"($in)/bin" | path exists } | each {|d| storerel $"($d)/bin" $out })
   (if ($path | is-empty) { {} } else { {PATH: {prepend: $path}} }) | merge $exported
 }
