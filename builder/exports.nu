@@ -57,7 +57,19 @@ export def write-exports [out: string, spec: record, platform: record, deps: lis
   let exports = ($exports | update propagate { $in ++ (required-deps $out $deps $exports) | uniq })
   let rel = {|s| $s | str replace -a $out "{root}" | str replace -a $env.NIX_STORE "{store}" }
   let exports = (if ($exports.dllDirs | is-empty) { $exports | reject dllDirs } else { $exports | update dllDirs { each { do $rel $in } } })
+  # bin: the executable names in bin/ (not hidden launchers)
+  let bin = (list-bin $out $platform)
+  let exports = ($exports | insert bin $bin)
   $exports | to json | save -f $"($out)/exports.json"
+}
+
+# list executable names in bin/ (the user-facing launchers, not .foo hidden binaries)
+def list-bin [out: path, platform: record]: nothing -> list<string> {
+  let bindir = $"($out)/bin"
+  if not ($bindir | path exists) { return [] }
+  let ext = ($platform.ext?.exe? | default "")
+  ls $bindir | get name | where { ($in | path basename) !~ '^\.' }
+  | each { $in | path basename | str replace -r $"($ext)$" "" }
 }
 
 # dependencies our .pc files (Requires) and cmake configs (find_dependency) name: a consumer
