@@ -620,6 +620,10 @@ drv
 // {
   pname = name;
   platform = platform.name;
+  # the executables the package declares (`bin`, else its name), readable at evaluation time
+  # without IFD; a symlink farm checks duplicates with it. finish writes the same list into
+  # exports.json after seeing what was installed
+  bin = args.bin or [ name ];
   # what package.nix wrote and read, for `variant`
   args = args0;
   sources = sources0;
