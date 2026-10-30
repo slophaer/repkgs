@@ -94,6 +94,7 @@ let
         "upstream-debug-after-misc.patch"
         "upstream-verneed-dst.patch"
         "glibc-unwind-origin.patch"
+        "glibc-origin-execfn.patch"
         "glibc-tzdir-etc-zoneinfo.patch"
         "upstream-const-generic-extension.patch"
         "glibc-loongarch-rtld-bcmp.patch"
