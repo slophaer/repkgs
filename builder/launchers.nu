@@ -19,9 +19,13 @@ use exports.nu [dep-closure]
 # runtime tools). Each dependency's `exports.env`, including transitively propagated ones,
 # become defaults. Direct deps override propagated values for the same key.
 def runtime-env [deps: list<string>, out: string]: nothing -> record {
-  # env: follow propagate transitively. Reverse so direct deps come last and win on conflict.
+  # env: follow propagate transitively. Propagated packages merge first, then the direct
+  # dependencies in their declared order, so a direct dependency wins over a propagated one and
+  # the order among direct dependencies stays what it was before propagate was followed.
   let closure = (dep-closure $deps)
-  let exported = ($closure | reverse | each {|d| $d.env } | reduce -f {} {|it, acc| $acc | merge $it }
+  let propagated = ($closure | where root not-in $deps)
+  let direct = ($deps | each {|d| $closure | where root == $d | first })
+  let exported = ($propagated ++ $direct | each {|d| $d.env } | reduce -f {} {|it, acc| $acc | merge $it }
     | items {|k, v| [$k {default: (storerel $v $out)}] } | into record)
   # PATH: direct deps only, not propagated (propagate is for libraries, not bin/ tools)
   let path = ($deps | where { $"($in)/bin" | path exists } | each {|d| storerel $"($d)/bin" $out })
