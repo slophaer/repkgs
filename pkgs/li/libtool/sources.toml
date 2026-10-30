@@ -1,0 +1,10 @@
+[upstream]
+purl = "pkg:gnu/libtool"
+
+[[source]]
+key = "default"
+url = "https://mirrors.kernel.org/gnu/libtool/libtool-{version}.tar.xz"
+hash = "sha256-GJwrVcTxinFaKh+wnM5ojp3/LKDBTpWnJ3FZQArF4Ic="
+
+[pin]
+version = "2.6.2"
