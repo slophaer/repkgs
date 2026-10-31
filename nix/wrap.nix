@@ -34,13 +34,38 @@ in
   files ? { },
 }:
 let
-  # write each file to share/wrap/<name>/ at build time
-  filesScript = concatStringsSep "\n" (
-    map (n: ''
-      mkdir $"($env.out)/share/wrap/${package.pname}"
-      ${toJSON files.${n}} | save -f $"($env.out)/share/wrap/${package.pname}/${n}"
-    '') (attrNames files)
-  );
+  # write each file to share/wrap/<name>/ at build time, AFTER link-tree ran
+  # (link-tree may have created share/ as a symlink; we convert it to a real
+  # directory with symlinked contents so wrap/<name>/ can be a real directory)
+  filesScript =
+    if files == { } then
+      ""
+    else
+      ''
+        # if share is a symlink from link-tree, expand it to a real directory
+        let share_dir = $"($env.out)/share"
+        if ($share_dir | path type) == "symlink" {
+          # readlink gives relative path; resolve it from share_dir's parent
+          let rel_target = (^readlink $share_dir)
+          let target = ($share_dir | path dirname | path join $rel_target | path expand)
+          rm $share_dir
+          mkdir $share_dir
+          for e in (ls $target) {
+            let name = ($e.name | path basename)
+            ^ln -s $e.name $"($share_dir)/($name)"
+          }
+        } else if not ($share_dir | path exists) {
+          mkdir $share_dir
+        }
+        mkdir $"($share_dir)/wrap/${package.pname}"
+        ${
+          concatStringsSep "\n" (
+            map (n: ''${toJSON files.${n}} | save -f $"($share_dir)/wrap/${package.pname}/${n}"'') (
+              attrNames files
+            )
+          )
+        }
+      '';
 
   script = ''
     use core.nu *
@@ -53,13 +78,13 @@ let
     # Set PATH from the derivation attribute
     $env.PATH = $attrs.PATH
 
-    # make files directory
-    ${filesScript}
-
-    # call the wrap builder
+    # call the wrap builder first (creates share/ as a symlink if the package has one)
     let argv = ('${toJSON argv}' | from json)
     let env_spec = ('${toJSON env}' | from json)
     wrap $attrs.package $argv $env_spec
+
+    # now create files in share/wrap/<name>/, expanding the share symlink if needed
+    ${filesScript}
   '';
 
   drv = derivation {
