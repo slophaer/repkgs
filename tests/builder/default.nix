@@ -79,5 +79,37 @@ mapAttrs (
       else
         { }
     )
+    // (
+      # wrap with files and an argv prefix; the file is `"hello"` (files are JSON-encoded)
+      if name == "wrap-files" then
+        let
+          inner = set.pkgs.test-wrap-files;
+          wrapped = set.wrap {
+            package = inner;
+            files."a.conf" = "hello";
+            argv = [
+              "--conf"
+              "{root}/share/wrap/test-wrap-files/a.conf"
+            ];
+          };
+        in
+        {
+          inherit wrapped;
+        }
+      else
+        { }
+    )
+    // (
+      # nix/closure.nix: jq's closure as a tarball
+      if name == "closure" then
+        {
+          tarball = set.closure {
+            roots = [ set.pkgs.jq ];
+            name = "jq";
+          };
+        }
+      else
+        { }
+    )
   )
 ) tests
