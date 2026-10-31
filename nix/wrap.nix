@@ -2,6 +2,7 @@
 # For each bin/<x> of the wrapped package, writes bin/.<x>.launch as a chained record:
 #   { program: "{store}/<hash>-pkg/bin/<x>", args: argv, env: env }
 # Links the rest of the package's trees (share/, lib/, etc.) so the wrapper stands in.
+# The output is named <pname>-<version>-wrap and carries pname, version and wraps.
 # files are written under share/wrap/<name>/ so argv can reference them as {root}/share/wrap/<name>/<file>.
 {
   platform,
@@ -58,13 +59,11 @@ let
           mkdir $share_dir
         }
         mkdir $"($share_dir)/wrap/${package.pname}"
-        ${
-          concatStringsSep "\n" (
-            map (n: ''${toJSON files.${n}} | save -f $"($share_dir)/wrap/${package.pname}/${n}"'') (
-              attrNames files
-            )
+        ${concatStringsSep "\n" (
+          map (n: ''${toJSON files.${n}} | save -f $"($share_dir)/wrap/${package.pname}/${n}"'') (
+            attrNames files
           )
-        }
+        )}
       '';
 
   script = ''
@@ -88,7 +87,7 @@ let
   '';
 
   drv = derivation {
-    name = "${package.pname}-wrap";
+    name = "${package.pname}-${package.version}-wrap";
     inherit (platform) system;
     __structuredAttrs = true;
     __contentAddressed = true;
@@ -118,6 +117,8 @@ in
 drv
 // {
   inherit (package) pname version;
+  # the package this one stands in for (Golconda's merge.nix reads it)
+  wraps = package;
   platform = platform.name;
   supported = package.supported or true;
   unsupportedReason = package.unsupportedReason or null;
