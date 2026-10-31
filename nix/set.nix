@@ -267,6 +267,20 @@ in
     inherit launch;
     nu = bootstrap.seed;
   };
+  # sbom { roots = [ pkgs.jq ]; name = "jq"; }: CycloneDX 1.5 of the packages' sources (nix/sbom.nix)
+  sbom = import ./sbom.nix {
+    nu = bootstrap.seed;
+    inherit system;
+    # the stage's libc has no package.nix; its sources.toml is the record
+    libc0 =
+      if plat.cross || os != "linux" then
+        null
+      else
+        {
+          name = "glibc";
+          dir = ../pkgs/gl/glibc;
+        };
+  };
   closure = import ./closure.nix {
     inherit baseTools;
     platform = plat;
