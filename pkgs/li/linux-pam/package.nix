@@ -22,6 +22,10 @@ package {
     pwaccess = "disabled";
     pam_userdb = "disabled";
     pam_unix = "enabled";
+    # pam_unix asks getspnam() first and runs unix_chkpwd only as a fallback. The image has no
+    # setuid binary, so without this every shadowed account (root included) needs the helper and
+    # the account phase fails
+    "pam_unix-try-getspnam" = true;
     examples = false;
   };
   # pam_start("dummy") reads /etc/pam.d/other, which is the image's and not in the sandbox
@@ -37,8 +41,9 @@ package {
       # prefix=/usr is where the files will be linked, not where this package is
       for f in (glob $"($c.out)/lib/pkgconfig/*.pc") { edit $f { str replace "prefix=/usr" "prefix=''${pcfiledir}/../.." } }
       rm -rf $"($c.out)/lib/systemd" # pam_namespace.service
-      # The image has no setuid binaries: pam_unix's helper for non-root callers is not installed
-      # (unix_update is only built with SELinux). pam_unix.so still verifies passwords for root
+      # The image has no setuid binaries: pam_unix's helper for callers that may not read
+      # /etc/shadow is not installed (unix_update is only built with SELinux). pam_unix.so reads
+      # the shadow entry itself (pam_unix-try-getspnam above)
       rm $"($c.out)/bin/unix_chkpwd"
     '';
   };
