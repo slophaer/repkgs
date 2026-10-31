@@ -583,7 +583,11 @@ auto RunCcMode(std::string_view argv0, std::span<const std::string> raw_args, co
   if (((inv.link || inv.link_one) && conf->binfmt != BinFmt::kElf) || lang == Language::kFortran) {
     inv.cacheable = false;
   }
-  if (conf->present) {
+  // JIG_PASSTHROUGH=1 (set per command: `CC="env JIG_PASSTHROUGH=1 cc"`): the raw compiler with the
+  // arguments untouched, no hardening, sysroot, RUNPATH or interpreter flags. For code that brings
+  // its own (kernel, EFI stubs). The compile cache still applies.
+  const std::string passthrough = Env("JIG_PASSTHROUGH");
+  if (conf->present && (passthrough.empty() || passthrough == "0")) {
     inv.args = BuildDriverArgs(*conf, lang, user_args);
     for (const std::string& arg : inv.args) {
       if (!std::ranges::contains(user_args, arg)) {
