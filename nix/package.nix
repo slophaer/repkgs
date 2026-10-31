@@ -76,6 +76,7 @@ let
     "install"
     "links"
     "completions"
+    "prefix"
   ];
 
   # the part of every derivation that is the same across the set: built once
