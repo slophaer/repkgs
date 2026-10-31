@@ -102,6 +102,16 @@ def main []: nothing -> nothing {
     x make ...$make
     x make ...$make install -j1 $"DESTDIR=($dest)" # parallel install races on the .dt -> .d depfile moves
     install-tree $dest $out
+    # glibc-unwind-origin.patch makes pthread_exit/pthread_cancel/backtrace dlopen
+    # $ORIGIN/libunwind.so.1. Copy the unwinder from the bootstrap runtimes so glibc
+    # is self-contained. Without it, any program calling those functions aborts.
+    if "bootstrapRuntimes" in $env {
+      let src = $"($env.bootstrapRuntimes)/lib/libunwind.so.1.0"
+      if ($src | path exists) {
+        x cp $src $"($out)/lib/libunwind.so.1.0"
+        x ln -s libunwind.so.1.0 $"($out)/lib/libunwind.so.1"
+      }
+    }
     if $env.locale == "true" { c-utf8-locale $src $out }
   }
   cc-facts $out {include-dirs: [include]}
