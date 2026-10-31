@@ -1,6 +1,7 @@
 # Everything after the last phase, in the order `main` lists it.
 use core.nu *
 use debug.nu [split-debug split-debug-macho strip-archives]
+use exports.nu [dep-closure exports-of]
 use implant.nu
 use launchers.nu
 
@@ -200,6 +201,66 @@ def relative-link [from: string, to: string]: nothing -> string {
   $f | skip $common | each { ".." } | append ($t | skip $common) | path join
 }
 
+# sonames named in an ELF file's .note.dlopen (systemd's ELF_NOTE_DLOPEN: notes of owner "FDO",
+# type 0x407c0c0a, each a JSON array of {feature, soname: [...]}). Not ELF or no such section: []
+def dlopen-sonames [path: string]: nothing -> list<string> {
+  let dump = (^llvm-objdump -j .note.dlopen -s $path | complete)
+  if $dump.exit_code != 0 { return [] }
+  # " 03b8 5b7b2266 65617475 7265223a 22626c6b  [{"feature":"blk": address, up to 4 hex words, ASCII
+  let hex = ($dump.stdout | lines | parse -r '^ [0-9a-f]+ (?<w>(?:[0-9a-f]{2,8} ?){1,4})' | get w | str replace -a ' ' '' | str join '')
+  if ($hex | is-empty) { return [] }
+  let b = ($hex | decode hex)
+  let u32 = {|o| $b | bytes at $o..<($o + 4) | into int --endian little }
+  let pad = {|n| ($n + 3) // 4 * 4 }
+  mut o = 0
+  mut out = []
+  while $o + 12 <= ($b | bytes length) {
+    let namesz = (do $u32 $o)
+    let descsz = (do $u32 ($o + 4))
+    let name = ($b | bytes at ($o + 12)..<($o + 12 + $namesz) | decode utf-8 | str trim -c (char nul))
+    let d = $o + 12 + (do $pad $namesz)
+    if $name == "FDO" and (do $u32 ($o + 8)) == 0x407c0c0a {
+      let json = ($b | bytes at $d..<($d + $descsz) | decode utf-8 | str trim -c (char nul) | from json)
+      $out ++= ($json | each { $in.soname? | default [] } | flatten)
+    }
+    $o = $d + (do $pad $descsz)
+  }
+  $out | uniq
+}
+
+# dlopen(3) of a bare soname searches the RUNPATH of the object that calls it (and no ld.so.cache
+# or LD_LIBRARY_PATH on Golconda). jig keeps a build-system -rpath dir that served no NEEDED, so a
+# package gets its .note.dlopen libraries' dirs by passing them (systemd: cc.ldflags). Checked
+# after reloc-fixup: every soname a file names in .note.dlopen that a dependency has must be in a
+# dir of its final RUNPATH, else the build fails; one no dependency has is optional (a note)
+def dlopen-check [c: record, inv: table]: nothing -> nothing {
+  let libdirs = (dep-closure ($c.deps | get root) | each {|d| $d.libDirs | each {|l| $"($d.root)/($l)" } } | flatten
+    | where { $in | path exists })
+  # a RUNPATH entry of a file at `rel` as a directory here: $ORIGIN counts from dest, own dirs map back to out
+  let resolve = {|rel, entry|
+    let abs = ($entry | str replace -r '^\$ORIGIN' ($"($c.dest)/($rel)" | path dirname))
+    let parts = ($abs | path split | reduce -f [] {|p, acc| if $p == ".." { $acc | drop 1 } else if $p == "." { $acc } else { $acc | append $p } })
+    let dir = ($parts | path join)
+    if ($dir | str starts-with $"($c.dest)/") or $dir == $c.dest { $dir | str replace $c.dest $c.out } else { $dir }
+  }
+  mut bad = []
+  for e in ($inv | where type == f) {
+    let sonames = (dlopen-sonames $e.path)
+    if ($sonames | is-empty) { continue }
+    let rp = (^llvm-readelf -d $e.path | parse -r 'Library runpath: \[(?<r>[^\]]*)\]' | get -o r.0 | default "")
+    let dirs = ($rp | split row ":" | where { $in != "" } | each {|x| do $resolve $e.rel $x })
+    for s in $sonames {
+      let have = ($libdirs | any {|l| $"($l)/($s)" | path exists })
+      let found = ($dirs | any {|d| $"($d)/($s)" | path exists })
+      if $have and not $found { $bad ++= [$"($e.rel): ($s)"] }
+      if not $have { note dlopen $"($e.rel): ($s) is in no dependency" }
+    }
+  }
+  if ($bad | is-not-empty) {
+    error make {msg: $".note.dlopen names libraries a dependency has, but RUNPATH does not reach them \(pass -Wl,-rpath,<dep>/lib\):\n($bad | str join "\n")"}
+  }
+}
+
 # What the binaries of each format need before reloc-fixup. prebuilt `true` implants interp +
 # stub, "ldso" stays byte-identical behind a launcher
 def binaries-elf [c: record, inv: table]: nothing -> nothing {
@@ -229,6 +290,8 @@ def relocate [c: record, inv: table]: nothing -> nothing {
   let deny = (if $c.platform.cross { $a.buildDependencies | where { $in not-in $a.dependencies } | each { [--deny $in] } | flatten } else { [] })
   let sdk = (if $c.platform.binfmt == "macho" { [--sdk $c.platform.sysroot] } else { [] })
   if $c.spec.prebuilt? != "ldso" { x reloc-fixup $c.out --dest $c.dest ...$sdk ...$deny }
+  # anew: launchers moved bin/x to bin/.x
+  if $c.platform.binfmt == "elf" { dlopen-check $c (inventory $c.out) }
 }
 
 # tests.version: a command whose output must contain the pinned version (true = --version), its
