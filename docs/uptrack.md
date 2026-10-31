@@ -109,12 +109,42 @@ Entries already matching `[pin]` are no-ops, so runs resume.
 **verify** builds through a tree adapter (`nix-build -A {name}` here) and appends evidence to the
 plan entry: the `version:` line our build prints, closure size delta, test result.
 
+## Branch heads (opt-in)
+
+A project without releases can follow a branch. Two forms, both opt-in; a plain purl never does this:
+
+- `pkg:github/<owner>/<repo>?branch=<name>`: the newest commit of the branch, from the GitHub API.
+- `pkg:git/<name>?url=<git url>&ref=<name>`: the same for any host, using `git` (so its credential
+  helper and `~/.netrc` apply). `ref` defaults to `HEAD`.
+
+There is exactly one candidate: the head. Its version is the UTC commit time, `YYYYMMDD.HHMMSS`,
+because `version cmp` orders that right. The commit id is not part of the version (letters between
+digits make `version is-prerelease` true). It is `rev` in `[pin]`, usable as `{rev}` in urls:
+
+```toml
+[upstream]
+purl = "pkg:github/adisbladis/adios?branch=master"
+
+[[source]]
+key = "default"
+url = "https://github.com/adisbladis/adios/archive/{rev}.tar.gz"
+```
+
+```toml
+[upstream]
+purl = "pkg:git/adios?url=https://github.com/adisbladis/adios&ref=master"
+```
+
+A head has no release date, no advisories and no age gate: `every` counts from the commit time, and
+`check` says "committed" instead of "released". Moving a branch back to an older commit is not an
+update. Use a release purl when the project has releases.
+
 ## Custom stages
 
 Without an `update.nu` a package needs nothing beyond `sources.toml`: versions come from the
 purl's datasource (github, gitlab, pypi, cargo, npm, hackage, gnu, `generic` with `?url=`, and
 two vendor feeds: `visualstudio` for the VS release manifest, `applesdk` for the macOS software
-update catalog), every `[[source]].url` gets `{version}` and the other `[pin]` keys substituted and prefetched, missing
+update catalog; branch heads, opt-in, see below), every `[[source]].url` gets `{version}` and the other `[pin]` keys substituted and prefetched, missing
 lock files are detected and generated, verify builds it. That is the path for most packages.
 `pkgs/xx/<name>/update.nu` exists only to replace a stage. It is a nu module exporting any of:
 
@@ -159,5 +189,5 @@ uptrack init <dir> <purl> <url-template> new sources.toml, pinned to upstream's 
 ```
 
 About 700 lines of nu in `pkgs/up/uptrack/src/`: purl, version comparison, datasources
-(github, gitlab, pypi, crates, npm, hackage, gnu, generic listing), cached http, the pipeline,
+(github, gitlab, pypi, crates, npm, hackage, gnu, generic listing, branch heads), cached http, the pipeline,
 locks (go, hackage, luarocks), CLI. Not built: advisory/libyear reports, grouped updates.

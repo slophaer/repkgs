@@ -15,6 +15,7 @@ export def versions [p: record<type: string, namespace: string, name: string, qu
     hackage => (fetch $"https://hackage.haskell.org/package/($p.name)/preferred" $p.name | get normal-version | each {|v| {version: $v} })
     gnu => (listing $"https://ftp.gnu.org/gnu/($p.name)/" $p.name)
     generic => (generic $p)
+    git => (git-head $p)
     visualstudio => (visualstudio $p)
     applesdk => (applesdk $p)
     _ => (error make {msg: $"no datasource for purl type ($p.type)"})
@@ -32,6 +33,7 @@ def fetch [url: string, what: string, --max-age: duration = 10min]: nothing -> o
 # releases if the project publishes any, else tags
 def github [p: record<type: string, namespace: string, name: string, qualifiers: record>]: nothing -> table<version: string> {
   let repo = $"https://api.github.com/repos/($p.namespace)/($p.name)"
+  if $p.qualifiers.branch? != null { return (github-head $repo $p.qualifiers.branch) }
   let rels = fetch $"($repo)/releases?per_page=20" $repo | where not draft | each {|r|
     {version: (version from-tag $r.tag_name), date: $r.published_at, prerelease: $r.prerelease, tag: $r.tag_name}
   }
@@ -100,4 +102,31 @@ def applesdk [p: record<type: string, namespace: string, name: string, qualifier
 def generic [p: record<type: string, namespace: string, name: string, qualifiers: record>]: nothing -> table<version: string> {
   if $p.qualifiers.url? == null { error make {msg: $"pkg:generic/($p.name) needs ?url="} }
   listing $p.qualifiers.url $p.name --regex $p.qualifiers.regex?
+}
+
+# branch heads have no releases: one candidate, the newest commit. The version is its UTC commit
+# time (20260227.095955) so `version cmp` orders heads; the sha is `rev`, a {rev} in urls. No sha in
+# the version: letters between digits ("1a2") would make `version is-prerelease` true
+def head-version [iso: string]: nothing -> string { $iso | into datetime | date to-timezone utc | format date '%Y%m%d.%H%M%S' }
+
+# pkg:github/<owner>/<repo>?branch=<b>
+def github-head [repo: string, branch: string]: nothing -> table<version: string> {
+  let c = fetch $"($repo)/commits/($branch | url encode --all)" $repo --max-age 1min
+  let date = $c.commit.committer.date
+  [{version: (head-version $date), date: $date, rev: $c.sha}]
+}
+
+# pkg:git/<name>?url=<git url>&ref=<branch> for any forge. git does the auth (credential helper,
+# ~/.netrc). ls-remote has no date, so fetch the one commit without blobs
+def git-head [p: record<name: string, qualifiers: record>]: nothing -> table<version: string> {
+  let url = $p.qualifiers.url?
+  if $url == null { error make {msg: $"pkg:git/($p.name) needs ?url="} }
+  let ref = $p.qualifiers.ref? | default HEAD
+  let dir = (mktemp -d -t uptrack-git.XXXX)
+  let r = (do { cd $dir; ^git init -q; ^git fetch -q --depth 1 --filter=blob:none $url $ref
+    ^git log -1 --format=%H/%cI FETCH_HEAD } | complete)
+  rm -rf $dir
+  if $r.exit_code != 0 { error make {msg: $"git fetch ($url) ($ref): ($r.stderr | str trim)"} }
+  let m = $r.stdout | str trim | split row /
+  [{version: (head-version $m.1), date: $m.1, rev: $m.0}]
 }

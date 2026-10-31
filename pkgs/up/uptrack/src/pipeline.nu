@@ -101,7 +101,7 @@ export def decide [pkgs: table, --prerelease]: nothing -> table {
     let c = ($eligible | where version == $best | first)
     let newer_pre = ($pkg.candidates | where prerelease | get version | where {|v| (version cmp $v $best) > 0 } | version max)
     let note = ([
-      (if $c.date != null { $"released ($c.date | into datetime | format date '%F')" })
+      (if $c.date != null { $"(if $c.rev? != null { "committed" } else { "released" }) ($c.date | into datetime | format date '%F')" })
       (if ($too_young | is-not-empty) { $"($too_young | length) newer held by every=($u.every)" })
       (if $newer_pre != null { $"pre-release ($newer_pre) ignored" })
     ] | compact | str join ", ")
