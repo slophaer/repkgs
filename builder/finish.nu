@@ -16,6 +16,17 @@ export def --env main [
   for b in (bins $c) {
     if not ($"($c.out)/bin/($b)($c.platform.ext.exe)" | path exists) { error make {msg: $"bin/($b)($c.platform.ext.exe) missing in output"} }
   }
+  # Check for undeclared bin files: every executable in bin/ should be in the spec's bin list
+  let declared = (bins $c)
+  let bindir = $"($c.out)/bin"
+  if ($bindir | path exists) {
+    let actual = (ls $bindir | get name | where { ($in | path basename) !~ '^\.' }
+      | each { $in | path basename | str replace -r $"($c.platform.ext.exe)$" "" })
+    let undeclared = ($actual | where { $in not-in $declared })
+    if ($undeclared | is-not-empty) {
+      print -e $"WARN ($c.spec.name): bin/ has undeclared executables: ($undeclared | str join ', '). Add them to spec.bin."
+    }
+  }
   let inv = (prune $c.out (inventory $c.out))
   layout-check $c.out
   # installed copies of source scripts carry the build env's path from prepare: not a dependency
