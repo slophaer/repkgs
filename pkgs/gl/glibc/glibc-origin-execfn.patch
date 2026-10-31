@@ -5,23 +5,28 @@ With no /proc, as in the init of an initrd, a binary with a $ORIGIN
 RUNPATH cannot load its libraries.
 
 Save AT_EXECFN in _dl_execfn and use its directory as the last resort.
-It is the name given to execve, so make a relative one absolute with
-getcwd, which needs no /proc. It is not canonical: a symbolic link keeps
-the directory of the link. Ignore it for setuid programs, as the
-environment is.
+It is the name given to execve, so resolve it as realpath does, without
+/proc: a relative one is taken from getcwd, and each component goes
+through readlinkat, a link's target walked in turn. The kernel starts
+an initrd's init as /init -> ../nix/store/.../bin/x, whose own
+directory is "/". Ignore it for setuid programs, as the environment is.
 
 --- a/sysdeps/unix/sysv/linux/dl-origin.c
 +++ b/sysdeps/unix/sysv/linux/dl-origin.c
-@@ -23,6 +23,66 @@
+@@ -23,6 +23,108 @@
  #include <sysdep.h>
  #include <fd_to_filename.h>
  
 +#include <unistd.h>
 +
-+/* Directory part of the executable's name, AT_EXECFN, as an absolute path
-+   in a malloc'd string without trailing slash.  AT_EXECFN is the name
-+   given to execve and is not canonical: it may be relative, or name a
-+   symbolic link.  Returns NULL if there is no usable name.  */
++/* Directory of the executable named by AT_EXECFN, as a malloc'd absolute
++   path without trailing slash, or NULL.  AT_EXECFN is the name given to
++   execve: it may be relative, or a symbolic link, as is /init in an
++   initrd (-> ../nix/store/.../bin/x), whose directory is not that of the
++   file.  So resolve it as realpath does, without /proc: a relative name
++   is taken from getcwd, each component goes through readlink, a link's
++   target replaces it and is walked in turn, and "." and ".." are taken
++   against the prefix walked so far, which holds no links.  */
 +static char *
 +origin_from_execfn (void)
 +{
@@ -29,57 +34,95 @@ environment is.
 +  if (fn == NULL || fn[0] == '\0')
 +    return NULL;
 +
-+  /* ld.so has no strrchr: find the last slash by hand.  */
-+  size_t dirlen = 0;
-+  for (size_t i = 0; fn[i] != '\0'; ++i)
-+    if (fn[i] == '/')
-+      dirlen = i;
-+  char cwd[PATH_MAX];
-+  size_t cwdlen = 0;
++  char out[PATH_MAX], rest[PATH_MAX], link[PATH_MAX];
++  size_t olen = 0, rlen = 0;
 +  if (fn[0] != '/')
 +    {
-+      /* Relative to the working directory, which getcwd gives without
-+	 /proc.  */
-+      long int r = INTERNAL_SYSCALL_CALL (getcwd, cwd, sizeof (cwd));
-+      if (r <= 1 || cwd[0] != '/')
++      long int r = INTERNAL_SYSCALL_CALL (getcwd, rest, sizeof (rest));
++      if (r <= 1 || rest[0] != '/')
 +	return NULL;
-+      cwdlen = r - 1;
-+      while (cwdlen > 1 && cwd[cwdlen - 1] == '/')
-+	--cwdlen;
++      rlen = r - 1;
++      rest[rlen++] = '/';
++    }
++  for (size_t i = 0; fn[i] != '\0'; ++i)
++    {
++      if (rlen + 1 >= sizeof (rest))
++	return NULL;
++      rest[rlen++] = fn[i];
 +    }
 +
-+  /* Absolute: the name up to the last slash, "/" if that is the root.
-+     Relative: the working directory, then "/" and the name's directory.  */
-+  size_t len = fn[0] == '/' ? (dirlen == 0 ? 1 : dirlen)
-+			    : cwdlen + (dirlen == 0 ? 0 : 1 + dirlen);
-+  char *result = malloc (len + 1);
++  size_t pos = 0;
++  int links = 0;
++  while (pos < rlen)
++    {
++      while (pos < rlen && rest[pos] == '/')
++	++pos;
++      if (pos == rlen)
++	break;
++      size_t end = pos;
++      while (end < rlen && rest[end] != '/')
++	++end;
++      size_t clen = end - pos;
++      if (clen == 1 && rest[pos] == '.')
++	{
++	  pos = end;
++	  continue;
++	}
++      if (clen == 2 && rest[pos] == '.' && rest[pos + 1] == '.')
++	{
++	  while (olen > 0 && out[olen - 1] != '/')
++	    --olen;
++	  if (olen > 0)
++	    --olen;
++	  pos = end;
++	  continue;
++	}
++      if (olen + 1 + clen >= sizeof (out))
++	return NULL;
++      size_t before = olen;
++      out[olen++] = '/';
++      __mempcpy (out + olen, rest + pos, clen);
++      olen += clen;
++      out[olen] = '\0';
++      long int n = INTERNAL_SYSCALL_CALL (readlinkat, AT_FDCWD, out, link,
++					  sizeof (link) - 1);
++      if (n <= 0)
++	{
++	  pos = end;
++	  continue;
++	}
++      /* A link: what is left becomes its target followed by the rest.  */
++      if (++links > 40)
++	return NULL;
++      size_t tail = rlen - end;
++      if ((size_t) n + tail >= sizeof (link))
++	return NULL;
++      __mempcpy (link + n, rest + end, tail);
++      rlen = n + tail;
++      __mempcpy (rest, link, rlen);
++      pos = 0;
++      olen = link[0] == '/' ? 0 : before;
++    }
++
++  /* The directory: up to the last slash, "/" for a file in the root.  */
++  while (olen > 0 && out[olen - 1] != '/')
++    --olen;
++  if (olen > 0)
++    --olen;
++  if (olen == 0)
++    out[olen++] = '/';
++  char *result = malloc (olen + 1);
 +  if (result == NULL)
 +    return NULL;
-+  char *cp = result;
-+  if (fn[0] == '/')
-+    {
-+      if (dirlen == 0)
-+	*cp++ = '/';
-+      else
-+	cp = __mempcpy (cp, fn, dirlen);
-+    }
-+  else
-+    {
-+      cp = __mempcpy (cp, cwd, cwdlen);
-+      if (dirlen != 0)
-+	{
-+	  *cp++ = '/';
-+	  cp = __mempcpy (cp, fn, dirlen);
-+	}
-+    }
-+  *cp = '\0';
++  __mempcpy (result, out, olen);
++  result[olen] = '\0';
 +  return result;
 +}
 +
  /* On Linux >= 2.1 systems which have the dcache implementation we can get
     the path of the application from the /proc/self/exe symlink.  Try this
     first and fall back on the generic method if necessary.  */
-@@ -55,7 +115,15 @@
+@@ -55,7 +157,15 @@
        result = (char *) -1;
        /* We use the environment variable LD_ORIGIN_PATH.  If it is set make
  	 a copy and strip out trailing slashes.  */
@@ -98,9 +141,9 @@ environment is.
  	  result = (char *) malloc (len + 1);
 --- a/sysdeps/generic/ldsodefs.h
 +++ b/sysdeps/generic/ldsodefs.h
-@@ -589,6 +589,9 @@
-   /* Location of the binary.  */
-   EXTERN const char *_dl_origin_path;
+@@ -595,6 +595,9 @@
+   EXTERN const char *_dl_rtld_dir;
+   EXTERN size_t _dl_rtld_dirlen;
  
 +  /* AT_EXECFN, the name the kernel was asked to execute.  */
 +  EXTERN const char *_dl_execfn;
