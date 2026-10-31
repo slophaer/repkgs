@@ -78,6 +78,7 @@ extern void _start(void) __attribute__((visibility("hidden")));
 #define SYS_write 1
 #define SYS_pread64 17
 #define SYS_readlinkat 267
+#define SYS_getcwd 79
 #define SYS_mmap 9
 #define SYS_mprotect 10
 #define SYS_exit 60
@@ -98,6 +99,7 @@ static inline i64 sys(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f) {
 #define SYS_write 4
 #define SYS_pread64 179
 #define SYS_readlinkat 296
+#define SYS_getcwd 182
 #define SYS_mmap 90
 #define SYS_mprotect 125
 #define SYS_exit 1
@@ -122,6 +124,7 @@ static inline i64 sys(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f) {
 #define SYS_write 64
 #define SYS_pread64 67
 #define SYS_readlinkat 78
+#define SYS_getcwd 17
 #define SYS_mmap 222
 #define SYS_mprotect 226
 #define SYS_exit 93
@@ -181,6 +184,69 @@ static void die(const char* m) {
   sys(SYS_exit, 127, 0, 0, 0, 0, 0);
 }
 
+// realpath(3) without /proc or libc, for AT_EXECFN when /proc is not mounted (initrd PID 1, which
+// the kernel starts as /init -> ../nix/store/.../bin/x). A relative name is taken from the cwd.
+// Each component goes through readlink(2); a link's target replaces it and is walked in turn, so
+// a farm of links to links ends at the file. "." and ".." are taken against the prefix walked so
+// far, which holds no links. Returns 0 and the result in `path`, or -1 with `path` unchanged
+static int resolve_symlinks(char* path, u64 pathmax) {
+  char out[4096], rest[4096], link[4096];
+  u64 olen = 0, rlen = 0;
+  if (path[0] != '/') {
+    i64 c = sys(SYS_getcwd, (i64)rest, sizeof rest, 0, 0, 0, 0);
+    if (c <= 1 || rest[0] != '/') return -1;
+    rlen = (u64)c - 1;
+    rest[rlen++] = '/';
+  }
+  for (u64 i = 0; path[i]; i++) {
+    if (rlen + 1 >= sizeof rest) return -1;
+    rest[rlen++] = path[i];
+  }
+  u64 pos = 0;
+  int links = 0;
+  while (pos < rlen) {
+    while (pos < rlen && rest[pos] == '/') pos++;
+    if (pos == rlen) break;
+    u64 end = pos;
+    while (end < rlen && rest[end] != '/') end++;
+    u64 clen = end - pos;
+    if (clen == 1 && rest[pos] == '.') {
+      pos = end;
+      continue;
+    }
+    if (clen == 2 && rest[pos] == '.' && rest[pos + 1] == '.') {
+      while (olen > 0 && out[olen - 1] != '/') olen--;
+      if (olen > 0) olen--;
+      pos = end;
+      continue;
+    }
+    if (olen + 1 + clen >= sizeof out) return -1;
+    u64 before = olen;
+    out[olen++] = '/';
+    for (u64 i = 0; i < clen; i++) out[olen++] = rest[pos + i];
+    out[olen] = '\0';
+    i64 n = sys(SYS_readlinkat, AT_FDCWD, (i64)out, (i64)link, sizeof link - 1, 0, 0);
+    if (n <= 0) {
+      pos = end;
+      continue;
+    }
+    // a link: what is left becomes its target followed by the rest
+    if (++links > 40) return -1;
+    u64 tail = rlen - end;
+    if ((u64)n + tail >= sizeof link) return -1;
+    for (u64 i = 0; i < tail; i++) link[n + i] = rest[end + i];
+    rlen = (u64)n + tail;
+    for (u64 i = 0; i < rlen; i++) rest[i] = link[i];
+    pos = 0;
+    olen = link[0] == '/' ? 0 : before;
+  }
+  if (olen == 0) out[olen++] = '/';
+  if (olen >= pathmax) return -1;
+  for (u64 i = 0; i < olen; i++) path[i] = out[i];
+  path[olen] = '\0';
+  return 0;
+}
+
 __attribute__((used)) static u64 reloc_main(u64* sp, u64 pagesz_unused) {
   // walk initial stack: argc, argv..., NULL, envp..., NULL, auxv
   u64 argc = sp[0];
@@ -229,8 +295,8 @@ __attribute__((used)) static u64 reloc_main(u64* sp, u64 pagesz_unused) {
   const char* rel = (const char*)(self_bias + interp_ph->p_vaddr);
 
   // 1. own path. /proc/self/exe is symlink-resolved and absolute. AT_EXECFN is whatever execve got
-  // (may be relative to cwd, which is still unchanged here, or via a symlink) — good enough as the
-  // fallback for early boot / containers without /proc.
+  // (may be relative to cwd, which is still unchanged here, or via a symlink). When /proc is not
+  // available (initrd PID 1), resolve symlinks in AT_EXECFN so dirname gives the real directory.
   char path[4096];
   i64 n = sys(SYS_readlinkat, AT_FDCWD, (i64) "/proc/self/exe", (i64)path, sizeof path - 1, 0, 0);
   if (n <= 0) {
@@ -238,6 +304,10 @@ __attribute__((used)) static u64 reloc_main(u64* sp, u64 pagesz_unused) {
     n = (i64)slen(execfn);
     if ((u64)n >= sizeof path) die("path too long");
     for (i64 i = 0; i < n; i++) path[i] = execfn[i];
+    path[n] = '\0';
+    // /init -> ../nix/store/.../bin/systemd: the directory is the target's. Unresolvable: as given
+    resolve_symlinks(path, sizeof path);
+    n = (i64)slen(path);
   }
   // dirname
   while (n > 0 && path[n - 1] != '/') n--;
