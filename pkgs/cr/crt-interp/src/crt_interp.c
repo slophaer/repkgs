@@ -181,6 +181,73 @@ static void die(const char* m) {
   sys(SYS_exit, 127, 0, 0, 0, 0, 0);
 }
 
+// Resolve symlinks in a path without /proc, by walking each component and calling readlink(2).
+// This is a minimal realpath for early boot (initrd PID 1, no /proc). Modifies `path` in place.
+// Assumes the path is absolute. Does not handle . or .. (exec'd paths don't have them).
+static void resolve_symlinks(char* path, u64 pathmax) {
+  char resolved[4096];
+  char link[4096];
+  u64 rlen = 0;
+
+  // Start with empty resolved path, then add each component
+  const char* p = path;
+  if (*p != '/') return;  // relative paths not handled, keep as-is
+
+  resolved[rlen++] = '/';
+
+  while (*p) {
+    // Skip leading slashes
+    while (*p == '/') p++;
+    if (*p == '\0') break;
+
+    // Find end of this component
+    const char* end = p;
+    while (*end && *end != '/') end++;
+    u64 complen = end - p;
+    if (complen == 0) continue;
+
+    // Build path to check: resolved + / + component
+    if (rlen + 1 + complen >= sizeof(resolved)) return;  // too long, give up
+    if (rlen > 1) resolved[rlen++] = '/';
+    for (u64 i = 0; i < complen; i++) resolved[rlen++] = p[i];
+    resolved[rlen] = '\0';
+
+    // Try to read as symlink
+    i64 llen = sys(SYS_readlinkat, AT_FDCWD, (i64)resolved, (i64)link, sizeof(link) - 1, 0, 0);
+    if (llen > 0) {
+      // It's a symlink
+      link[llen] = '\0';
+      if (link[0] == '/') {
+        // Absolute symlink: restart from the link target
+        rlen = 0;
+        for (u64 i = 0; i <= (u64)llen; i++) resolved[rlen++] = link[i];
+        rlen--; // don't count NUL
+      } else {
+        // Relative symlink: replace the last component with the link
+        // Back up to remove the component we just added
+        while (rlen > 1 && resolved[rlen - 1] != '/') rlen--;
+        if (rlen > 1) rlen--;  // remove the slash too if not root
+        // Append the link
+        for (u64 i = 0; i < (u64)llen; i++) {
+          if (rlen + 1 >= sizeof(resolved)) return;
+          if (i > 0 || rlen == 0 || resolved[rlen - 1] != '/')
+            resolved[rlen++] = link[i];
+          else if (link[i] != '/')
+            resolved[rlen++] = link[i];
+        }
+        resolved[rlen] = '\0';
+      }
+    }
+    // else: not a symlink, keep the component
+
+    p = end;
+  }
+
+  // Copy resolved back to path
+  if (rlen >= pathmax) return;  // too long
+  for (u64 i = 0; i <= rlen; i++) path[i] = resolved[i];
+}
+
 __attribute__((used)) static u64 reloc_main(u64* sp, u64 pagesz_unused) {
   // walk initial stack: argc, argv..., NULL, envp..., NULL, auxv
   u64 argc = sp[0];
@@ -229,8 +296,8 @@ __attribute__((used)) static u64 reloc_main(u64* sp, u64 pagesz_unused) {
   const char* rel = (const char*)(self_bias + interp_ph->p_vaddr);
 
   // 1. own path. /proc/self/exe is symlink-resolved and absolute. AT_EXECFN is whatever execve got
-  // (may be relative to cwd, which is still unchanged here, or via a symlink) — good enough as the
-  // fallback for early boot / containers without /proc.
+  // (may be relative to cwd, which is still unchanged here, or via a symlink). When /proc is not
+  // available (initrd PID 1), resolve symlinks in AT_EXECFN so dirname gives the real directory.
   char path[4096];
   i64 n = sys(SYS_readlinkat, AT_FDCWD, (i64) "/proc/self/exe", (i64)path, sizeof path - 1, 0, 0);
   if (n <= 0) {
@@ -238,6 +305,10 @@ __attribute__((used)) static u64 reloc_main(u64* sp, u64 pagesz_unused) {
     n = (i64)slen(execfn);
     if ((u64)n >= sizeof path) die("path too long");
     for (i64 i = 0; i < n; i++) path[i] = execfn[i];
+    path[n] = '\0';
+    // Resolve symlinks in the path: /init -> /nix/store/.../bin/systemd
+    resolve_symlinks(path, sizeof path);
+    n = (i64)slen(path);
   }
   // dirname
   while (n > 0 && path[n - 1] != '/') n--;
