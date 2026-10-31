@@ -213,38 +213,80 @@ package {
     '';
   };
 
+  # All executables installed in bin/: finish warns about any it finds that is not listed.
   bin = [
+    # Core systemctl and friends
     "systemctl"
     "journalctl"
-    "systemd-analyze"
-    "systemd-cat"
-    "systemd-cgls"
-    "systemd-cgtop"
-    "systemd-creds"
-    "systemd-cryptsetup"
-    "systemd-delta"
-    "systemd-detect-virt"
-    "systemd-escape"
-    "systemd-id128"
-    "systemd-inhibit"
-    "systemd-machine-id-setup"
-    "systemd-mount"
-    "systemd-notify"
-    "systemd-path"
-    "systemd-run"
-    "systemd-socket-activate"
-    "systemd-umount"
-    # Note: systemd-sysusers, systemd-tmpfiles, systemd-repart, systemd-sysupdate
-    # are libexec (in lib/systemd/), not bin
-    "bootctl"
     "busctl"
-    "hostnamectl"
-    # "localectl" # localed = false
     "loginctl"
+    "hostnamectl"
     "networkctl"
     "resolvectl"
     "timedatectl"
     "udevadm"
+    "bootctl"
+
+    # Init and power control (symlinks to systemd)
+    "init"
+    "halt"
+    "poweroff"
+    "reboot"
+    "shutdown"
+
+    # systemd-* tools
+    "systemd-ac-power"
+    "systemd-analyze"
+    "systemd-ask-password"
+    "systemd-cat"
+    "systemd-cgls"
+    "systemd-cgtop"
+    "systemd-confext"
+    "systemd-creds"
+    "systemd-cryptenroll"
+    "systemd-cryptsetup"
+    "systemd-delta"
+    "systemd-detect-virt"
+    "systemd-dissect"
+    "systemd-escape"
+    "systemd-firstboot"
+    "systemd-hwdb"
+    "systemd-id128"
+    "systemd-inhibit"
+    "systemd-machine-id-setup"
+    "systemd-mount"
+    "systemd-mstack"
+    "systemd-mute-console"
+    "systemd-notify"
+    "systemd-path"
+    "systemd-pty-forward"
+    "systemd-repart"
+    "systemd-resolve"
+    "systemd-run"
+    "systemd-socket-activate"
+    "systemd-stdio-bridge"
+    "systemd-sysext"
+    "systemd-sysinstall"
+    "systemd-sysusers"
+    "systemd-tmpfiles"
+    "systemd-tty-ask-password-agent"
+    "systemd-umount"
+    "systemd-vpick"
+
+    # Other tools
+    "coredumpctl"
+    "importctl"
+    "oomctl"
+    "resolvconf"
+    "run0"
+    "storagectl"
+    "userdbctl"
+    "varlinkctl"
+
+    # Mount helpers (called by systemd units)
+    "mount.ddi"
+    "mount.mstack"
+    "mount.storage"
   ];
 
   # Tests: version check and ensure no bash in closure (Golconda has no bash)
