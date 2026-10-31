@@ -75,6 +75,10 @@ package {
     "HOSTCC=cc"
     "HOSTCXX=c++"
     "HOSTLD=ld.lld"
+    # buildDependencies are tools on PATH, not include/library paths: point HOSTCC at the host
+    # libraries (objtool: libelf; extract-cert: openssl; sorttable: libunwind)
+    "HOSTCFLAGS=-I${buildPkgs.elfutils}/include -I${buildPkgs.openssl}/include"
+    "HOSTLDFLAGS=-L${buildPkgs.elfutils}/lib -L${buildPkgs.openssl}/lib -L${buildPkgs.libunwind}/lib -Wl,-rpath,${buildPkgs.elfutils}/lib -Wl,-rpath,${buildPkgs.openssl}/lib -Wl,-rpath,${buildPkgs.libunwind}/lib"
     "HOSTAR=llvm-ar"
     # Reproducibility
     "KBUILD_BUILD_TIMESTAMP=@315532800"
@@ -86,21 +90,19 @@ package {
   # Disable jig's hardening: the kernel sets its own
   cc.hardening = false;
 
-  # kconfig needs flex and bison; timeconst.h needs bc;
-  # oid_registry needs perl
+  # Everything here runs or links on the build machine (kconfig, objtool, sorttable, extract-cert),
+  # so a cross build needs it for the build platform: buildDependencies, not dependencies.
+  # kconfig needs flex and bison; timeconst.h needs bc; oid_registry needs perl.
+  # objtool needs elfutils headers/libs via pkg-config.
+  # extract-cert needs openssl headers.
+  # sorttable needs libunwind for pthread_exit at runtime.
+  # These only affect HOSTCC (jig) via -isystem, which the kernel's own code ignores
+  # (it uses raw clang via CC=clang).
   buildDependencies = [
     buildPkgs.flex
     buildPkgs.bison
     buildPkgs.bc
     buildPkgs.perl
-  ];
-
-  # objtool needs elfutils headers/libs via pkg-config.
-  # extract-cert needs openssl headers.
-  # sorttable needs libunwind for pthread_exit at runtime.
-  # These are safe: they only affect HOSTCC (jig) via -isystem,
-  # which the kernel's own code ignores (it uses raw clang via CC=clang)
-  dependencies = [
     buildPkgs.elfutils
     buildPkgs.openssl
     buildPkgs.libunwind
