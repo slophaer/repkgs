@@ -490,7 +490,19 @@ auto BuildDriverArgs(const DriverConf& conf, Language lang, std::span<const std:
   // dependency -L dirs after the build tree's own, like a system lib dir would be
   std::vector<std::string> tail;
   if (user.linking && user.have_input) {
-    tail = conf.package.ldflags;
+    // a package's -rpath (the dirs of libraries it dlopen()s) goes into our padded RUNPATH, which
+    // `jig fixup` has the slack to rewrite; a link without the policy (static, EFI) drops it
+    for (size_t i = 0; i < conf.package.ldflags.size(); ++i) {
+      if (policy.takes_rpath) {
+        if (std::optional<std::string> rpath = TakeRpathArg(conf.package.ldflags, i)) {
+          for (const std::string& dir : Split(*rpath, ':')) {
+            user.runpath.Add(dir);
+          }
+          continue;
+        }
+      }
+      tail.push_back(conf.package.ldflags.at(i));
+    }
     if (policy.libs != nullptr) {
       policy.libs(conf, user);
     }
