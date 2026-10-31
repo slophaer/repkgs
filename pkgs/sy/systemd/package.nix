@@ -5,6 +5,29 @@
   pkgs,
   buildPkgs,
 }:
+let
+  deps = [
+    pkgs.util-linux # libmount, libblkid, libuuid, libfdisk
+    pkgs.libcap
+    pkgs.libseccomp
+    pkgs.openssl
+    pkgs.p11-kit
+    pkgs.tpm2-tss
+    pkgs.cryptsetup # libcryptsetup
+    pkgs.linux-pam
+    pkgs.libxcrypt
+    pkgs.zstd
+    pkgs.lz4
+    pkgs.xz
+    pkgs.zlib
+    pkgs.bzip2
+    pkgs.curl
+    pkgs.libarchive
+    pkgs.pcre2
+    pkgs.acl
+    pkgs.attr
+  ];
+in
 package {
   name = "systemd";
   uses = [ "meson" ];
@@ -129,27 +152,11 @@ package {
     buildPkgs.python-pyelftools
   ];
 
-  dependencies = [
-    pkgs.util-linux # libmount, libblkid, libuuid, libfdisk
-    pkgs.libcap
-    pkgs.libseccomp
-    pkgs.openssl
-    pkgs.p11-kit
-    pkgs.tpm2-tss
-    pkgs.cryptsetup # libcryptsetup
-    pkgs.linux-pam
-    pkgs.libxcrypt
-    pkgs.zstd
-    pkgs.lz4
-    pkgs.xz
-    pkgs.zlib
-    pkgs.bzip2
-    pkgs.curl
-    pkgs.libarchive
-    pkgs.pcre2
-    pkgs.acl
-    pkgs.attr
-  ];
+  dependencies = deps;
+  # systemd 262 dlopen()s most of these by soname (.note.dlopen), from libsystemd-shared: ld.so
+  # looks in the caller's RUNPATH (Golconda has no ld.so.cache), so their lib dirs go there.
+  # finish's dlopen-check holds every binary to it
+  cc.ldflags = map (d: "-Wl,-rpath,${d}/lib") deps;
 
   # Override install to handle /etc and /var: meson installs them but finish rejects $out/etc.
   # These are sample configuration files; the image's tmpfiles C copies them.
