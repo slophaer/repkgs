@@ -48,10 +48,13 @@ def cross-files [c: record]: nothing -> list<string> {
 }
 
 # meson setup with prefix/libdir/buildtype defaults, a generated cross file when cross, then `meson.defs`
+# Farm packages (spec.prefix set, e.g. "/usr") configure with that prefix and install via DESTDIR
 export def configure []: nothing -> nothing {
   let c = (ctx); let o = (options meson)
+  # spec.prefix for farm packages, meson.defs.prefix for manual control, otherwise $out
+  let prefix = ($c.spec.prefix? | default ($o.defs.prefix? | default $c.out))
   let opts = ({
-    prefix: $c.out
+    prefix: $prefix
     libdir: "lib"
     sbindir: "bin"
     buildtype: "plain"  # cc brings -O2 -g itself
@@ -72,5 +75,21 @@ export def test []: nothing -> nothing {
   if ($skip | is-not-empty) and ($names | is-empty) { note meson-test "every test matches meson.skipTests"; return }
   x meson test --no-rebuild --print-errorlogs --num-processes (test-jobs) ...$names
 }
-# meson install
-export def install []: nothing -> nothing { x meson install --no-rebuild }
+# meson install. Farm packages (spec.prefix) install via DESTDIR and copy the prefix subtree to $out
+export def install []: nothing -> nothing {
+  let c = (ctx)
+  let farm_prefix = $c.spec.prefix?
+  if ($farm_prefix | is-empty) {
+    x meson install --no-rebuild
+  } else {
+    let destdir = $"($c.build)/dest"
+    with-env {DESTDIR: $destdir} { x meson install --no-rebuild }
+    # copy prefix subtree (e.g. /usr) to $out, rewriting .pc files to be relative
+    let prefix_dir = ($farm_prefix | str trim --left --char '/')
+    ^cp -r $"($destdir)/($prefix_dir)/." $c.out
+    # .pc files: rewrite prefix=/usr to ${pcfiledir}/../.. so dependents find includes/libs
+    for f in (files $"($c.out)/lib/pkgconfig/*.pc") {
+      edit $f { str replace $"prefix=($farm_prefix)" "prefix=${pcfiledir}/../.." }
+    }
+  }
+}
