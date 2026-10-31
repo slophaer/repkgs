@@ -26,6 +26,7 @@ package {
     # Device-mapper only (no full LVM)
     "--enable-devmapper"
     "--enable-cmdlib" # libdm, dmsetup
+    "--enable-pkgconfig" # install devmapper.pc for libcryptsetup
 
     # udev rules: install for future udev_sync when systemd exists
     "--enable-udev_rules"
