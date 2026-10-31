@@ -143,11 +143,9 @@ let
     PRINTK = "y";
     EARLY_PRINTK = "y";
 
-    # ===== Unwinder: use frame pointer instead of ORC =====
-    # ORC requires objtool's sorttable which uses pthread, and jig's
-    # $ORIGIN RPATH doesn't work for build-time tools
-    UNWINDER_ORC = "n";
-    UNWINDER_FRAME_POINTER = "y";
+    # ===== Unwinder: ORC (objtool/sorttable need pthreads; libunwind fixed in the glibc output) =====
+    UNWINDER_ORC = "y";
+    UNWINDER_FRAME_POINTER = "n";
   };
 in
 package {
