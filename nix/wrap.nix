@@ -52,7 +52,7 @@ let
           mkdir $share_dir
           for e in (ls $target) {
             let name = ($e.name | path basename)
-            ^ln -s $e.name $"($share_dir)/($name)"
+            ^ln -sr $e.name $"($share_dir)/($name)"
           }
         } else if not ($share_dir | path exists) {
           mkdir $share_dir
