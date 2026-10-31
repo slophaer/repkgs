@@ -1,6 +1,7 @@
 # Everything after the last phase, in the order `main` lists it.
 use core.nu *
 use debug.nu [split-debug split-debug-macho strip-archives]
+use exports.nu [dep-closure exports-of]
 use implant.nu
 use launchers.nu
 
@@ -14,6 +15,17 @@ export def --env main [
   if not ($c.out | path exists) { error make {msg: "nothing was installed into $out"} }
   for b in (bins $c) {
     if not ($"($c.out)/bin/($b)($c.platform.ext.exe)" | path exists) { error make {msg: $"bin/($b)($c.platform.ext.exe) missing in output"} }
+  }
+  # Check for undeclared bin files: every executable in bin/ should be in the spec's bin list
+  let declared = (bins $c)
+  let bindir = $"($c.out)/bin"
+  if ($bindir | path exists) {
+    let actual = (ls $bindir | get name | where { ($in | path basename) !~ '^\.' }
+      | each { $in | path basename | str replace -r $"($c.platform.ext.exe)$" "" })
+    let undeclared = ($actual | where { $in not-in $declared })
+    if ($undeclared | is-not-empty) {
+      print -e $"WARN ($c.spec.name): bin/ has undeclared executables: ($undeclared | str join ', '). Add them to spec.bin."
+    }
   }
   let inv = (prune $c.out (inventory $c.out))
   layout-check $c.out
@@ -200,12 +212,89 @@ def relative-link [from: string, to: string]: nothing -> string {
   $f | skip $common | each { ".." } | append ($t | skip $common) | path join
 }
 
+# Parse .note.dlopen sections from ELF files and add directories to RUNPATH for dlopen'd libraries.
+# systemd's ELF_NOTE_DLOPEN embeds JSON with sonames of optional dependencies (libcryptsetup, etc.);
+# glibc's ld.so searches only the object's RUNPATH, so those directories must be there.
+def dlopen-runpath [c: record, inv: table]: nothing -> nothing {
+  # Build a map of soname -> lib directory from the full dependency closure
+  let closure = (dep-closure ($c.deps | get root))
+  let soname_dirs = ($closure | each {|dep|
+    let libdirs = ($dep.libDirs? | default [] | each {|d| $"($dep.root)/($d)" })
+    $libdirs | each {|dir|
+      if ($dir | path exists) {
+        ls $dir | where name =~ '\.so' | each {|f| {soname: ($f.name | path basename), dir: $dir} }
+      } else { [] }
+    } | flatten
+  } | flatten | uniq-by soname)
+
+  # Find ELF files that might have .note.dlopen
+  let out = $c.out
+  let elfs = ($inv | where {|e| $e.type == f and ($e.rel =~ '\.so' or ($"($out)/($e.rel)" | path type) == file) })
+  for elf in $elfs {
+    let path = $"($c.out)/($elf.rel)"
+    # Check for .note.dlopen section using llvm-readelf
+    let notes = (^llvm-readelf -n $path 2>/dev/null | complete)
+    if $notes.exit_code != 0 or not ($notes.stdout | str contains 'dlopen') { continue }
+
+    # Extract JSON from .note.dlopen using llvm-objdump
+    let dump = (^llvm-objdump -j .note.dlopen -s $path 2>/dev/null | complete)
+    if $dump.exit_code != 0 { continue }
+
+    # Parse the hex dump to extract JSON. Format: address, hex groups (space-separated), ASCII on right.
+    # Example: " 03b8 5b7b2266 65617475 7265223a 22626c6b  [{"feature":"blk"
+    # Extract hex groups only (skip address, strip ASCII comment on right).
+    let hex_lines = ($dump.stdout | lines | where { $in =~ '^\s*[0-9a-f]+\s' }
+      | each { $in | str replace -r '^\s*[0-9a-f]+\s+' '' | str replace -r '\s{2,}.*$' '' | str replace -a ' ' '' })
+    let hex = ($hex_lines | str join '')
+    
+    # Find all JSON arrays: look for "soname" field pattern in hex
+    # 736f6e616d65 = "soname", followed by array with lib names
+    let sonames = (if ($hex | str contains '736f6e616d65') {
+      # Find each JSON object by looking for [{...}] patterns
+      # 5b7b = "[{", 7d5d = "}]"
+      $hex | split row '5b7b' | skip 1 | each {|chunk|
+        let end = ($chunk | str index-of '7d5d')
+        if $end != null {
+          let json_hex = '5b7b' ++ ($chunk | str substring ..$end) ++ '7d5d'
+          # Decode hex to string
+          let bytes = ($json_hex | split chars | chunks 2 | each { $in | str join '' | into int -r 16 | into binary | decode utf-8 } | str join '' | str trim -c (char nul))
+          # Parse JSON and extract sonames
+          try {
+            let json = ($bytes | from json)
+            $json | each { $in.soname? | default [] } | flatten
+          } catch { [] }
+        } else { [] }
+      } | flatten | uniq
+    } else { [] })
+
+    if ($sonames | is-empty) { continue }
+
+    # Find directories for each soname and add to RUNPATH
+    let dirs_to_add = ($sonames | each {|sn|
+      $soname_dirs | where soname == $sn | get dir | first 1
+    } | flatten | uniq)
+
+    if ($dirs_to_add | is-not-empty) {
+      for dir in $dirs_to_add {
+        ^formatelf --add-rpath $dir $path
+      }
+      note dlopen $"($elf.rel): added RUNPATH for ($sonames | str join ', ')"
+    } else {
+      let missing = ($sonames | where { ($soname_dirs | where soname == $in | is-empty) })
+      if ($missing | is-not-empty) {
+        print -e $"WARN ($elf.rel): dlopen sonames not in closure: ($missing | str join ', ')"
+      }
+    }
+  }
+}
+
 # What the binaries of each format need before reloc-fixup. prebuilt `true` implants interp +
 # stub, "ldso" stays byte-identical behind a launcher
 def binaries-elf [c: record, inv: table]: nothing -> nothing {
   if $c.spec.debug { split-debug $c.out (attrs).outputs.debug $c.njobs ($inv | where type == f) }
   if $c.spec.prebuilt? == true { implant $c }
   launchers $c
+  dlopen-runpath $c $inv
 }
 
 def binaries-macho [c: record, inv: table]: nothing -> nothing {
