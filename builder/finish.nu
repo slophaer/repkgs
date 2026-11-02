@@ -249,11 +249,14 @@ def dlopen-sonames [path: string]: nothing -> list<string> {
 # dlopen(3) of a bare soname searches the RUNPATH of the object that calls it (and no ld.so.cache
 # or LD_LIBRARY_PATH on Golconda). jig keeps a build-system -rpath dir that served no NEEDED, so a
 # package gets its .note.dlopen libraries' dirs by passing them (systemd: cc.ldflags). Checked
-# after reloc-fixup: every soname a file names in .note.dlopen that a dependency has must be in a
-# dir of its final RUNPATH, else the build fails; one no dependency has is optional (a note)
-def dlopen-check [c: record, inv: table]: nothing -> nothing {
-  let libdirs = (dep-closure ($c.deps | get root) | each {|d| $d.libDirs | each {|l| $"($d.root)/($l)" } } | flatten
-    | where { $in | path exists })
+# after reloc-fixup: every soname a file names in .note.dlopen that a dependency or the package's
+# own lib/ has must be in a dir of its final RUNPATH, else the build fails; one neither has is
+# optional (a note)
+export def dlopen-check [c: record, inv: table]: nothing -> nothing {
+  let exports = (if $c.spec.exports? == false { {} } else { $c.spec.exports? | default {} })
+  let own = ((["lib"] ++ ($exports.libDirs? | default [])) | uniq | each { $"($c.out)/($in)" })
+  let libdirs = ((dep-closure ($c.deps | get root) | each {|d| $d.libDirs | each {|l| $"($d.root)/($l)" } } | flatten)
+    ++ $own | where { $in | path exists })
   # a RUNPATH entry of a file at `rel` as a directory here: $ORIGIN counts from dest, own dirs map back to out
   let resolve = {|rel, entry|
     let abs = ($entry | str replace -r '^\$ORIGIN' ($"($c.dest)/($rel)" | path dirname))
@@ -271,11 +274,11 @@ def dlopen-check [c: record, inv: table]: nothing -> nothing {
       let have = ($libdirs | any {|l| $"($l)/($s)" | path exists })
       let found = ($dirs | any {|d| $"($d)/($s)" | path exists })
       if $have and not $found { $bad ++= [$"($e.rel): ($s)"] }
-      if not $have { note dlopen $"($e.rel): ($s) is in no dependency" }
+      if not $have { note dlopen $"($e.rel): ($s) is in no dependency or the package's own lib/" }
     }
   }
   if ($bad | is-not-empty) {
-    error make {msg: $".note.dlopen names libraries a dependency has, but RUNPATH does not reach them \(pass -Wl,-rpath,<dep>/lib\):\n($bad | str join "\n")"}
+    error make {msg: $".note.dlopen names libraries a dependency or the package's own lib/ has, but RUNPATH does not reach them \(pass -Wl,-rpath,<dir>\):\n($bad | str join "\n")"}
   }
 }
 
