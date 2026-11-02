@@ -13,8 +13,10 @@ mkdir $"($t)/mid/bin" $"($t)/farm/bin"
 
 let mnt = (which mount | get path.0)
 # /proc hidden by an empty tmpfs in a private mount namespace, then `cmd` exec'd from `t`
-def noproc [cmd: string] {
-  ^unshare -rm sh -c $"($mnt) -t tmpfs none /proc && cd ($t) && test ! -e /proc/self/exe && exec ($cmd)" | complete
+def noproc [cmd: string]: nothing -> string {
+  let r = (^unshare -rm sh -c $"($mnt) -t tmpfs none /proc && cd ($t) && test ! -e /proc/self/exe && exec ($cmd)" | complete)
+  assert $"without /proc, ($cmd) runs: ($r.stdout)($r.stderr)" ($r.exit_code == 0)
+  $r.stdout
 }
 let probe = (^unshare -rm sh -c $"($mnt) -t tmpfs none /proc && test ! -e /proc/self/exe" | complete)
 if $probe.exit_code != 0 {
@@ -22,8 +24,8 @@ if $probe.exit_code != 0 {
   exit 1
 }
 for cmd in [$"($t)/init" $"($t)/farm/bin/zv" $"($t)/farmdir/bin/zv" "./init" "farm/bin/zv" $zv] {
-  let r = (noproc $cmd)
-  assert $"without /proc, ($cmd) runs: ($r.stdout)($r.stderr)" ($r.exit_code == 0 and ($r.stdout | str starts-with "zlib "))
+  let stdout = (noproc $cmd)
+  assert $"without /proc, ($cmd) loads libz: ($stdout)" ($stdout | str starts-with "zlib ")
 }
 print "execfn: /proc hidden, 6 ways of naming the program load interpreter and libz"
 done

@@ -40,7 +40,7 @@ let
         [ ];
   };
   toolchain = stage.cc;
-  libcOut = stage.libcOut;
+  inherit (stage) libcOut;
   launch = stage.launch or null;
   dlaudit = stage.dlaudit or null;
   buildPkgs =
