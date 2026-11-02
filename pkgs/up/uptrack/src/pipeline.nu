@@ -81,6 +81,8 @@ export def decide [pkgs: table, --prerelease]: nothing -> table {
   $pkgs | each {|pkg|
     let u = $pkg.upstream
     let current = $pkg.pin.version?
+    let source = (watch-purl $pkg)
+    let branch_head = $source.type == git or ($source.type == github and $source.qualifiers.branch? != null)
     let allowed = ($pkg.candidates
       | where {|c| $prerelease or ($u.prerelease? | default false) or not $c.prerelease }
       | where {|c| version satisfies $c.version $u.allow? })
@@ -89,7 +91,8 @@ export def decide [pkgs: table, --prerelease]: nothing -> table {
       $allowed | where {|c| $c.date != null and ((date now) - ($c.date | into datetime)) < ($u.every | into duration) }
     })
     let eligible = ($allowed | where {|c| $c not-in $too_young })
-    let best = ($eligible | get version | version max)
+    # Branch sources resolve one head. Its identity, not its timestamp, decides updates.
+    let best = (if $branch_head { $eligible | get -o 0.version } else { $eligible | get version | version max })
     let entry = ($pkg | merge {from: $current, to: null, note: null})
     let problem = ([
       $pkg.error
@@ -97,8 +100,15 @@ export def decide [pkgs: table, --prerelease]: nothing -> table {
       (if $best == null { $"all ($pkg.candidates | length) candidates filtered by allow/prerelease/every" })
     ] | compact | get -o 0)
     if $problem != null { return ($entry | update note $problem) }
-    if $current != null and (version cmp $best $current) <= 0 { return $entry }
+    if $branch_head and (($eligible | length) != 1 or $eligible.0.rev? == null) {
+      return ($entry | update note "branch datasource must return one revision")
+    }
     let c = ($eligible | where version == $best | first)
+    if $current != null {
+      if $branch_head {
+        if $pkg.pin.rev? == $c.rev { return $entry }
+      } else if (version cmp $best $current) <= 0 { return $entry }
+    }
     let newer_pre = ($pkg.candidates | where prerelease | get version | where {|v| (version cmp $v $best) > 0 } | version max)
     let note = ([
       (if $c.date != null { $"(if $c.rev? != null { "committed" } else { "released" }) ($c.date | into datetime | format date '%F')" })

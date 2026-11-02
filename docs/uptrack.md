@@ -113,13 +113,14 @@ plan entry: the `version:` line our build prints, closure size delta, test resul
 
 A project without releases can follow a branch. Two forms, both opt-in; a plain purl never does this:
 
-- `pkg:github/<owner>/<repo>?branch=<name>`: the newest commit of the branch, from the GitHub API.
+- `pkg:github/<owner>/<repo>?branch=<name>`: the branch tip, from the GitHub API.
 - `pkg:git/<name>?url=<git url>&ref=<name>`: the same for any host, using `git` (so its credential
   helper and `~/.netrc` apply). `ref` defaults to `HEAD`.
 
-There is exactly one candidate: the head. Its version is the UTC commit time, `YYYYMMDD.HHMMSS`,
-because `version cmp` orders that right. The commit id is not part of the version (letters between
-digits make `version is-prerelease` true). It is `rev` in `[pin]`, usable as `{rev}` in urls:
+There is exactly one candidate: the head. Its display version is the UTC commit time,
+`YYYYMMDD.HHMMSS`. The revision decides whether to update, not the timestamp. The commit id lives
+in `[pin].rev`, usable as `{rev}` in URLs. It is not part of the version because hexadecimal
+letters could make `version is-prerelease` treat it as a prerelease:
 
 ```toml
 [upstream]
@@ -135,9 +136,14 @@ url = "https://github.com/adisbladis/adios/archive/{rev}.tar.gz"
 purl = "pkg:git/adios?url=https://github.com/adisbladis/adios&ref=master"
 ```
 
-A head has no release date, no advisories and no age gate: `every` counts from the commit time, and
-`check` says "committed" instead of "released". Moving a branch back to an older commit is not an
-update. Use a release purl when the project has releases.
+`every` counts from the commit time, and `check` says "committed" instead of "released".
+A changed revision is an update even when its timestamp is equal or lower. This follows the
+selected branch after a force-push as well as a fast-forward. An unchanged revision is a no-op.
+Use a release purl when updates must follow release-version order.
+
+The Git datasource checks each subprocess and removes its temporary repository after success or
+failure. Run `nix-build tests/uptrack.nix` for local Git fixtures, a cached GitHub response, update
+policy checks, and injected subprocess failures. The tests need no network credentials.
 
 ## Custom stages
 

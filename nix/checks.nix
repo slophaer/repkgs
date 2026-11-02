@@ -37,6 +37,7 @@ lib.mergeAttrsList (map forPlatform platforms)
 // prefixed "tests-" separateTests
 // prefixed "builder-" (import ../tests/builder { inherit system; })
 // {
+  uptrack = import ../tests/uptrack.nix { inherit system; };
   treefmt =
     pkgs.runCommand "treefmt-check"
       {

@@ -104,9 +104,9 @@ def generic [p: record<type: string, namespace: string, name: string, qualifiers
   listing $p.qualifiers.url $p.name --regex $p.qualifiers.regex?
 }
 
-# branch heads have no releases: one candidate, the newest commit. The version is its UTC commit
-# time (20260227.095955) so `version cmp` orders heads; the sha is `rev`, a {rev} in urls. No sha in
-# the version: letters between digits ("1a2") would make `version is-prerelease` true
+# Branch sources return one head. Its UTC timestamp is a display version and age-filter input;
+# pipeline decides updates by revision identity, not timestamp order. Keep the sha in `rev`,
+# usable as {rev} in URLs, so it is not mistaken for a prerelease version.
 def head-version [iso: string]: nothing -> string { $iso | into datetime | date to-timezone utc | format date '%Y%m%d.%H%M%S' }
 
 # pkg:github/<owner>/<repo>?branch=<b>
@@ -116,6 +116,12 @@ def github-head [repo: string, branch: string]: nothing -> table<version: string
   [{version: (head-version $date), date: $date, rev: $c.sha}]
 }
 
+def --wrapped git-command [dir: path, ...args: string]: nothing -> string {
+  let r = (^git -C $dir ...$args | complete)
+  if $r.exit_code != 0 { error make {msg: $"git ($args.0): ($r.stderr | str trim)"} }
+  $r.stdout | str trim
+}
+
 # pkg:git/<name>?url=<git url>&ref=<branch> for any forge. git does the auth (credential helper,
 # ~/.netrc). ls-remote has no date, so fetch the one commit without blobs
 def git-head [p: record<name: string, qualifiers: record>]: nothing -> table<version: string> {
@@ -123,10 +129,14 @@ def git-head [p: record<name: string, qualifiers: record>]: nothing -> table<ver
   if $url == null { error make {msg: $"pkg:git/($p.name) needs ?url="} }
   let ref = $p.qualifiers.ref? | default HEAD
   let dir = (mktemp -d -t uptrack-git.XXXX)
-  let r = (do { cd $dir; ^git init -q; ^git fetch -q --depth 1 --filter=blob:none $url $ref
-    ^git log -1 --format=%H/%cI FETCH_HEAD } | complete)
+  let r = (try {
+    git-command $dir init -q | ignore
+    git-command $dir fetch -q --depth 1 --filter=blob:none -- $url $ref | ignore
+    let m = (git-command $dir log -1 --format=%H/%cI FETCH_HEAD | split row /)
+    if ($m | length) != 2 or $m.0 !~ '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' { error make {msg: "invalid git head response"} }
+    {candidate: {version: (head-version $m.1), date: $m.1, rev: $m.0}, error: null}
+  } catch {|e| {candidate: null, error: $e.msg} })
   rm -rf $dir
-  if $r.exit_code != 0 { error make {msg: $"git fetch ($url) ($ref): ($r.stderr | str trim)"} }
-  let m = $r.stdout | str trim | split row /
-  [{version: (head-version $m.1), date: $m.1, rev: $m.0}]
+  if $r.error != null { error make {msg: $r.error} }
+  [$r.candidate]
 }
