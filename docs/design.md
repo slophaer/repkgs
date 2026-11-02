@@ -135,7 +135,7 @@ reference scanner work unchanged.
 |---|---|
 | ELF NEEDED / RUNPATH | jig links with RUNPATH for exactly the dirs that satisfied a `-l`. `reloc-fixup` rewrites in place: NEEDED becomes `$ORIGIN/…/libfoo.so.1` (one `open` per library), RUNPATH keeps libc and `dlopen` dirs |
 | Mach-O LC_LOAD_DYLIB | dependents record each dylib's absolute install name at link time (`-headerpad_max_install_names`), `reloc-fixup` respells them and store LC_RPATHs `@loader_path/…`, re-signs ad hoc |
-| PT_INTERP | a 300-byte entry stub (`crt-interp`) maps ld.so relative to `/proc/self/exe`. glibc unmodified, 0.09 ms |
+| PT_INTERP | the freestanding `crt-interp` entry stub maps ld.so relative to the executable; without `/proc`, it resolves symlinks in `AT_EXECFN` |
 | upstream binaries | `prebuilt = true`: formatelf implants the same stub and RUNPATH |
 | scripts, wrappers | `launch`: `bin/foo` hardlink + `bin/.foo.launch` record with `{root}` placeholders. No shebang patching, no makeWrapper |
 | glibc data, pkg-config, cmake | relative to `libc.so.6` (one patch), `${pcfiledir}`, native. `.la` deleted |
@@ -149,6 +149,17 @@ content-addressed rebuilds stable (lld hashes `$out` into build ids and string o
 [NixOS/nix#16465](https://github.com/NixOS/nix/pull/16465) covers derivations that do see
 `$out`, and [#16477](https://github.com/NixOS/nix/pull/16477) lets a rebuild that still differs
 replace the build trace of a collected output instead of failing).
+
+The no-`/proc` path has two parts: `crt-interp` finds the loader, and a glibc patch resolves
+`AT_EXECFN` for `$ORIGIN`. The fallback covers direct ELF execution through stable, accessible
+paths, including symlink chains. It is not a general replacement for `/proc/self/exe`:
+kernel-launched shebang scripts name the script in `AT_EXECFN`, and descriptor execution can
+name an inaccessible descriptor path. Those cases are outside the fallback's current guarantee.
+Secure execution does not use the glibc fallback.
+
+Native stage-2 libc carries its own unwinder, so applications can reference it without the
+compiler sysroot. Early stages and cross targets keep libc and the target unwinder together in
+the merged sysroot. The patched unwind pathname does not search the executable's RUNPATH.
 
 Ambient data (CA bundle, zoneinfo, fonts) is an environment variable or system path, never a
 store path.
