@@ -4,7 +4,7 @@ package {
   name = "test-propagate-a";
   version = "1";
   source = ./src;
-  dependencies = [ pkgs.test-propagate-b ];
+  dependencies = [ pkgs.test-propagate-b pkgs.test-propagate-d ];
   phases = [
     {
       name = "build";

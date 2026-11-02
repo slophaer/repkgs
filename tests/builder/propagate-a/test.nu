@@ -21,4 +21,9 @@ assert "FOO uses default semantics" ($record.env.FOO.default? != null)
 assert "C_MARKER uses default semantics" ($record.env.C_MARKER.default? != null)
 assert "B_MARKER uses default semantics" ($record.env.B_MARKER.default? != null)
 
+# Precedence: a direct dependency beats a propagated one, and among direct dependencies the last
+# declared one wins (A declares B then D)
+assert "direct dependency beats propagated" ($record.env.PREC_DIRECT.default == "from-b")
+assert "last declared direct dependency wins" ($record.env.PREC_ORDER.default == "from-d")
+
 done
