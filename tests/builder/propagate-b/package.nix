@@ -19,6 +19,10 @@ package {
   exports = {
     propagate = [ pkgs.test-propagate-c ];
     env.B_MARKER = "from-b";
+    # the same key C exports (propagated): the direct dependency must win
+    env.PREC_DIRECT = "from-b";
+    # the same key D exports (direct): the last declared direct dependency must win
+    env.PREC_ORDER = "from-b";
   };
   tests.version = false;
 }

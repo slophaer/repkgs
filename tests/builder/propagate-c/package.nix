@@ -18,6 +18,8 @@ package {
   exports = {
     env.FOO = "{root}/share";
     env.C_MARKER = "from-c";
+    # B propagates this; a direct dependency's value must beat it
+    env.PREC_DIRECT = "from-c";
   };
   tests.version = false;
 }
