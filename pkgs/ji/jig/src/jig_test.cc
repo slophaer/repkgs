@@ -654,6 +654,22 @@ void TestNixStore() {
                   R"a(["-c","echo \"hi\"\n"],[("a","2"),("b","1"),("out","/o")]))a");
 }
 
+// JIG_PASSTHROUGH: only "1" is on; every other value (empty, 0, false, off, true) keeps the
+// driver policy. A c++ passthrough run keeps the language driver mode the conf's clang lacks
+void TestPassthrough() {
+  assert(!jig::PassthroughEnabled(""));
+  assert(!jig::PassthroughEnabled("0"));
+  assert(!jig::PassthroughEnabled("false"));
+  assert(!jig::PassthroughEnabled("off"));
+  assert(!jig::PassthroughEnabled("true"));
+  assert(!jig::PassthroughEnabled("yes"));
+  assert(jig::PassthroughEnabled("1"));
+  assert(jig::PassthroughArgs(jig::Language::kC, V({"-c", "a.c"})) == V({"-c", "a.c"}));
+  assert(jig::PassthroughArgs(jig::Language::kCxx, V({"x.o", "-o", "x"})) ==
+         V({"--driver-mode=g++", "x.o", "-o", "x"}));
+  assert(jig::PassthroughArgs(jig::Language::kFortran, V({"-c", "a.f90"})) == V({"-c", "a.f90"}));
+}
+
 }  // namespace
 
 // NOLINTNEXTLINE(bugprone-exception-escape): a throwing test is a failing test
@@ -683,6 +699,7 @@ auto main() -> int {
   TestBinaryImage();
   TestMachOFixup();
   TestNixStore();
+  TestPassthrough();
   std::println("jig_test: ok");
   return 0;
 }
