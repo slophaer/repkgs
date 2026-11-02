@@ -221,6 +221,7 @@ let
       libcRecipe ? null,
       libcArgs ? { },
       libcGiven ? null,
+      standaloneLibc ? false,
       linuxHeaders ? null,
       extraParts ? [ ],
       ccArgs ? { },
@@ -251,10 +252,12 @@ let
       ++ extraParts;
       runtimes = if given then null else run [ ] "runtimes" { sysroot = sysroot base; };
       full = sysroot (base ++ [ runtimes ]);
+      # Early and cross glibc find libunwind beside libc in the merged sysroot.
+      libcOut = if standaloneLibc then libc else full;
       cc = run [ ] "cc" (
         {
           sysroot = full;
-          libcOut = libc;
+          inherit libcOut;
         }
         // (if runtimes == null then { } else { runtimesOut = runtimes; })
         // ccArgs
@@ -265,6 +268,7 @@ let
         platform
         compiler-rt
         libc
+        libcOut
         runtimes
         cc
         ;
@@ -276,18 +280,23 @@ let
     # bootstrapRuntimes: a pre-built runtimes output whose libunwind.so.1 is copied
     # into glibc's lib/. glibc's unwind-link patch dlopens $ORIGIN/libunwind.so.1,
     # so the unwinder must sit next to libc.so.6. stage1.runtimes provides it for
-    # the build platform; cross platforms fall back to the executable's RUNPATH.
-    { bootstrapRuntimes ? null }:
+    # the native stage2 libc. Earlier stages and cross targets keep the sysroot,
+    # where libc and its target unwinder already sit together.
+    {
+      bootstrapRuntimes ? null,
+    }:
     let
       linux-headers = run [ ] "linux-headers" { };
       c = chain {
         inherit platform run ccArgs;
         libcRecipe = "glibc";
+        standaloneLibc = bootstrapRuntimes != null;
         libcArgs = {
           linuxHeaders = linux-headers;
           # C.UTF-8 is compiled by running the fresh localedef
           locale = platform.clangTarget == buildPlatform.clangTarget;
-        } // (if bootstrapRuntimes != null then { inherit bootstrapRuntimes; } else { });
+        }
+        // (if bootstrapRuntimes != null then { inherit bootstrapRuntimes; } else { });
         linuxHeaders = linux-headers;
       };
     in

@@ -77,6 +77,13 @@ def c-utf8-locale [src: path, out: path]: nothing -> nothing {
   }
 }
 
+export def install-unwinder [runtimes: path, out: path]: nothing -> nothing {
+  let src = $"($runtimes)/lib/libunwind.so.1.0"
+  if not ($src | path exists) { error make {msg: $"missing bootstrap unwinder: ($src)"} }
+  x cp $src $"($out)/lib/libunwind.so.1.0"
+  x ln -s libunwind.so.1.0 $"($out)/lib/libunwind.so.1"
+}
+
 def main []: nothing -> nothing {
   let out = $env.out
   let src = (patched-source)
@@ -106,11 +113,7 @@ def main []: nothing -> nothing {
     # $ORIGIN/libunwind.so.1. Copy the unwinder from the bootstrap runtimes so glibc
     # is self-contained. Without it, any program calling those functions aborts.
     if "bootstrapRuntimes" in $env {
-      let src = $"($env.bootstrapRuntimes)/lib/libunwind.so.1.0"
-      if ($src | path exists) {
-        x cp $src $"($out)/lib/libunwind.so.1.0"
-        x ln -s libunwind.so.1.0 $"($out)/lib/libunwind.so.1"
-      }
+      install-unwinder $env.bootstrapRuntimes $out
     }
     if $env.locale == "true" { c-utf8-locale $src $out }
   }

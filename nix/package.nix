@@ -5,7 +5,7 @@
 {
   platform,
   toolchain,
-  # the libc output: PT_INTERP names it directly, not through the sysroot's symlinks
+  # runtime libc root: standalone native libc, or the early/cross sysroot with its unwinder
   libcOut,
   launch,
   dlaudit,
@@ -21,7 +21,7 @@
 }:
 let
   elf = platform.binfmt == "elf";
-  # ld.so lives in the libc output; the sysroot only links to it and would join every closure
+  # Native glibc is self-contained; early/cross libc still needs its merged sysroot.
   interpRoot = if elf then libcOut else toolchain.sysroot;
   inherit (lib)
     join

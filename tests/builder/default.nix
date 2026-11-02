@@ -112,9 +112,15 @@ mapAttrs (
         { }
     )
     // (
-      if name == "sysroot" then
+      if
+        builtins.elem name [
+          "sysroot"
+          "unwinder"
+        ]
+      then
         {
           sysrootRecipe = ../../bootstrap/sysroot.nu;
+          glibcRecipe = ../../pkgs/gl/glibc/bootstrap.nu;
           bootstrapLib = ../../bootstrap/lib.nu;
           bootstrapGlob = ../../builder/glob.nu;
           bootstrapLog = ../../builder/log.nu;
