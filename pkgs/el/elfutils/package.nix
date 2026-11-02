@@ -1,6 +1,6 @@
 # elfutils: libraries and utilities for handling ELF files
 # Provides libelf which is needed for kernel's objtool
-{ package, buildPkgs }:
+{ package, pkgs }:
 package {
   name = "elfutils";
 
@@ -19,11 +19,29 @@ package {
   cc.cflags = [ "-Wno-error=incompatible-pointer-types-discards-qualifiers" ];
 
   dependencies = [
-    buildPkgs.zlib
-    buildPkgs.zstd
+    pkgs.zlib
+    pkgs.zstd
   ];
 
-  bin = [ "eu-readelf" "eu-objdump" "eu-nm" "eu-strip" ];
+  bin = [
+    "eu-addr2line"
+    "eu-ar"
+    "eu-elfclassify"
+    "eu-elfcmp"
+    "eu-elfcompress"
+    "eu-elflint"
+    "eu-findtextrel"
+    "eu-nm"
+    "eu-objdump"
+    "eu-ranlib"
+    "eu-readelf"
+    "eu-size"
+    "eu-srcfiles"
+    "eu-stack"
+    "eu-strings"
+    "eu-strip"
+    "eu-unstrip"
+  ];
   tests.run = false;
   tests.version = "eu-readelf --version";
 

@@ -38,6 +38,7 @@ lib.mergeAttrsList (map forPlatform platforms)
 // prefixed "builder-" (import ../tests/builder { inherit system; })
 // {
   bootstrap-libc = import ../tests/bootstrap-libc.nix { inherit system; };
+  elfutils = import ../tests/elfutils.nix { inherit system; };
   sbom = import ../tests/sbom.nix { inherit system; };
   treefmt =
     pkgs.runCommand "treefmt-check"
