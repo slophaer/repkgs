@@ -118,6 +118,22 @@ mapAttrs (
         { }
     )
     // (
+      # declared executables (pkg.bin, at evaluation) against what bin/ holds (exports.json)
+      if name == "bin" then
+        let
+          inherit (set.pkgs) jq zlib;
+          wrapped = set.wrap { package = jq; };
+        in
+        {
+          inherit jq wrapped;
+          jqBin = builtins.toJSON jq.bin;
+          zlibBin = builtins.toJSON zlib.bin;
+          wrappedBin = builtins.toJSON (wrapped.bin or null);
+        }
+      else
+        { }
+    )
+    // (
       # nix/closure.nix: jq's closure as a tarball
       if name == "closure" then
         {

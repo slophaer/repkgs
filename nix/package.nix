@@ -621,9 +621,10 @@ drv
 // {
   pname = name;
   platform = platform.name;
-  # the executables the package declares (`bin`, else its name), readable at evaluation time
-  # without IFD; a symlink farm checks duplicates with it. finish writes the same list into
-  # exports.json after seeing what was installed
+  # the executables the package declares, readable at evaluation time without IFD; a symlink
+  # farm links and checks duplicates with it. `bin`, else the package's name: a package that
+  # installs no bin/<name> (a library) declares `bin = [ ]`. This is a declaration, not an
+  # inventory: exports.json `bin` lists what bin/ holds after the build
   bin = args.bin or [ name ];
   # what package.nix wrote and read, for `variant`
   args = args0;

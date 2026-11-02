@@ -6,6 +6,7 @@
 }:
 package {
   name = "zlib";
+  bin = [ ]; # a library: no bin/zlib
   uses = [ "cmake" ];
   cmake.tool = buildPkgs.cmake-bootstrap; # cmake links this
   cmake.defs = {
