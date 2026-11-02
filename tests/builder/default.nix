@@ -80,21 +80,39 @@ mapAttrs (
         { }
     )
     // (
-      # wrap with files and an argv prefix; the file is `"hello"` (files are JSON-encoded)
+      # wrap with files, an argv prefix and env; apostrophes must pass through unchanged
       if name == "wrap-files" then
+        {
+          wrapped = set.wrap {
+            package = set.pkgs.test-wrap-files;
+            files."a.conf" = "hello";
+            files."it's.conf" = "say 'hi'\n";
+            argv = [
+              "--conf"
+              "{root}/share/wrap/test-wrap-files/a.conf"
+              "it's"
+            ];
+            env.OUTER.set = "o'k";
+          };
+        }
+      else
+        { }
+    )
+    // (
+      # a wrapper over packages whose bin/ entries have launch records of their own
+      if name == "wrap-chain" then
         let
           inner = set.pkgs.test-wrap-files;
           wrapped = set.wrap {
             package = inner;
-            files."a.conf" = "hello";
-            argv = [
-              "--conf"
-              "{root}/share/wrap/test-wrap-files/a.conf"
-            ];
+            argv = [ "--outer" ];
+            env.OUTER.set = "outer";
           };
         in
         {
           inherit wrapped;
+          wrappedBin = builtins.toJSON (wrapped.bin or null);
+          innerBin = builtins.toJSON inner.bin;
         }
       else
         { }

@@ -1,7 +1,9 @@
 # wrap: create launch records that chain to a wrapped package's binaries.
 # For each bin/<x> of the package, writes bin/.<x>.launch with:
 #   { program: "{store}/<hash>-pkg/bin/<x>", args: argv, env: env }
-# Links the rest of the package's trees so the wrapper stands in for the original.
+# program is the package's own bin/<x>, launcher or not, so its record (args, env, interpreter)
+# still applies after ours. Links the rest of the package's trees so the wrapper stands in for
+# the original; files land in share/wrap/<pname>/.
 
 use core.nu *
 
@@ -31,83 +33,73 @@ def link-tree [pkg: string, out: string]: nothing -> nothing {
   }
 }
 
-# Read the platform record from structured attrs
-def get-platform []: nothing -> record {
-  open $env.NIX_ATTRS_JSON_FILE | get platform
+# files {name: text} into share/wrap/<pname>/. A linked share/ becomes a real directory of links
+def write-files [out: string, pname: string, files: record]: nothing -> nothing {
+  if ($files | is-empty) { return }
+  let share = $"($out)/share"
+  if ($share | path type) == "symlink" {
+    let target = ($share | path dirname | path join (^readlink $share) | path expand)
+    rm $share
+    mkdir $share
+    for e in (ls $target) { ^ln -sr $e.name $"($share)/($e.name | path basename)" }
+  }
+  let dir = $"($share)/wrap/($pname)"
+  mkdir $dir
+  for f in ($files | transpose name text) {
+    if $f.name in ["" "." ".."] or ($f.name | str contains "/") {
+      error make {msg: $"wrap: file name '($f.name)' must be a plain name"}
+    }
+    $f.text | save -f $"($dir)/($f.name)"
+  }
 }
 
-# Main entry point: create launchers for all binaries in the package
-export def main [pkg: string, argv: list<string>, env_spec: record]: nothing -> nothing {
-  let platform = (get-platform)
+# Create launchers for all binaries in the package, then the files
+export def main [pkg: string, argv: list<string>, env_spec: record, files: record, pname: string]: nothing -> nothing {
+  let platform = (open $env.NIX_ATTRS_JSON_FILE | get platform)
   let out = $env.out
   let bindir = $"($pkg)/bin"
+  let exe = ($platform.ext?.exe? | default "")
 
-  # Link non-bin trees from the wrapped package
   link-tree $pkg $out
 
-  # If no bin/ in the package, we're done
-  if not ($bindir | path exists) {
-    return
-  }
+  # skip hidden files: they are the package's own launch records and real binaries
+  let entries = (if ($bindir | path exists) { ls $bindir | get name | where { ($in | path basename) !~ '^\.' } } else { [] })
+  # bin/<x>.exe on PE: the record is .<x>.exe.launch
+  let names = ($entries | each { path basename | str replace -r $"($exe | str replace -a '.' '\.')$" "" })
+  if ($entries | is-not-empty) { mkdir $"($out)/bin" }
 
-  mkdir $"($out)/bin"
+  # { VAR: { op: value } } with store paths as templates
+  let env_record = ($env_spec | items {|k, v|
+    [$k ($v | items {|op, val| [$op (if ($val | describe) =~ "list" { $val | each { storerel $in $out } } else { storerel $val $out })] } | into record)]
+  } | into record)
 
-  # Find all executables in bin/ (skip hidden files which are already launchers)
-  let entries = (ls $bindir | get name | where { ($in | path basename) !~ '^\.' })
-
-  for f in $entries {
-    let name = ($f | path basename)
-    let exe = $platform.ext?.exe? | default ""
-
-    # The program path in the chained record points to the wrapped package's binary
-    # If the original is already a launcher (symlink to launch), chain to its .name instead
-    let target = (if ($f | path type) == "symlink" and (^readlink $f | path basename) == "launch" {
-      # It's a launcher - chain to the real program
-      $"($bindir)/.($name)"
-    } else {
-      $f
-    })
-
-    # Convert env to the record format: { VAR: { op: value } }
-    # Also apply storerel to values
-    let env_record = ($env_spec | items {|k, v|
-      let ops = ($v | items {|op, val|
-        let expanded = (if ($val | describe) =~ "list" {
-          $val | each { storerel $in $out }
-        } else {
-          storerel $val $out
-        })
-        [$op $expanded]
-      } | into record)
-      [$k $ops]
-    } | into record)
-
-    # Build the launch record
+  for e in ($entries | zip $names) {
+    let f = $e.0
+    let name = $e.1
     # Never set argv0 in a chained record - it would loop
     let record = {
-      program: (storerel $target $out)
+      program: (storerel $f $out)
       args: ($argv | each { storerel $in $out })
       env: $env_record
     } | (if ($in.args | is-empty) { reject args } else { $in })
       | (if ($in.env | is-empty) { reject env } else { $in })
-
-    # Write the launch record
     $record | to json -r | save -f $"($out)/bin/.($name)($exe).launch"
 
-    # Create the launcher symlink/copy (relative, for relocatability)
+    # the launcher: a relative symlink, a copy on PE
     if $platform.binfmt == "coff" {
       cp $platform.launch $"($out)/bin/($name)($exe)"
     } else {
-      let link = (relative-link $"($out)/bin/($name)" $platform.launch)
-      ^ln -sf $link $"($out)/bin/($name)"
+      ^ln -sf (relative-link $"($out)/bin/($name)" $platform.launch) $"($out)/bin/($name)"
     }
-
-    print -e $"wrap: bin/($name) -> ($target)"
+    print -e $"wrap: bin/($name) -> ($f)"
   }
 
-  # Write exports.json so this package can be a dependency
+  write-files $out $pname $files
+
+  # exports.json so this package can be a dependency; bin is what bin/ holds, as finish writes it
   {
     name: ($pkg | path basename | str substring 33.. | str replace -r '-(x86_64|aarch64|riscv64|loongarch64|powerpc64le)-[\w-]+$' '' | $"($in)-wrap")
     exports: false
+    bin: $names
   } | to json | save -f $"($out)/exports.json"
 }
