@@ -63,5 +63,41 @@ mapAttrs (
       else
         { }
     )
+    // (
+      # nix/wrap.nix: the wrapped output's name carries the version, `wraps` names the package
+      if name == "wrap" then
+        let
+          inner = set.pkgs.test-tz;
+          wrapped = set.wrap { package = inner; };
+        in
+        assert wrapped.wraps == inner && wrapped.version == inner.version && wrapped.pname == inner.pname;
+        {
+          inherit wrapped;
+          wrappedName = wrapped.name;
+          wrappedWant = "${inner.pname}-${inner.version}-wrap";
+        }
+      else
+        { }
+    )
+    // (
+      # wrap with files and an argv prefix; the file is `"hello"` (files are JSON-encoded)
+      if name == "wrap-files" then
+        let
+          inner = set.pkgs.test-wrap-files;
+          wrapped = set.wrap {
+            package = inner;
+            files."a.conf" = "hello";
+            argv = [
+              "--conf"
+              "{root}/share/wrap/test-wrap-files/a.conf"
+            ];
+          };
+        in
+        {
+          inherit wrapped;
+        }
+      else
+        { }
+    )
   )
 ) tests
