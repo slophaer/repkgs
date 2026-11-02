@@ -161,7 +161,7 @@ def bins [c: record]: nothing -> list<string> {
 export def undeclared-bin [inv: table, declared: list<string>, platform: record]: nothing -> list<string> {
   let ext = ($platform.ext?.exe? | default "")
   $inv | where type in [f l] and rel =~ '^bin/[^/]+$'
-  | where { ^find $in.path -maxdepth 0 -perm -u+x | complete | get stdout | is-not-empty }
+  | where { ^find $in.path -maxdepth 0 -perm -u+x | is-not-empty }
   | get rel | each { $in | str replace -r '^bin/' '' | str replace -r $"($ext)$" '' }
   | where { $in not-in $declared }
 }
