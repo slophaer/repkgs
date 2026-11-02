@@ -124,6 +124,9 @@ mapAttrs (
           inherit (set.pkgs) jq zlib;
           wrapped = set.wrap { package = jq; };
         in
+        assert set.pkgs.oniguruma.bin == [ "onig-config" ];
+        assert set.pkgs.test-tz.bin == [ "tz" ];
+        assert set.pkgs.test-tz.args.tests.version == false;
         {
           inherit jq wrapped;
           jqBin = builtins.toJSON jq.bin;
