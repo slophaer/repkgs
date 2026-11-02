@@ -16,18 +16,14 @@ export def --env main [
   for b in (bins $c) {
     if not ($"($c.out)/bin/($b)($c.platform.ext.exe)" | path exists) { error make {msg: $"bin/($b)($c.platform.ext.exe) missing in output"} }
   }
-  # Check for undeclared bin files: every executable in bin/ should be in the spec's bin list
-  let declared = (bins $c)
-  let bindir = $"($c.out)/bin"
-  if ($bindir | path exists) {
-    let actual = (ls $bindir | get name | where { ($in | path basename) !~ '^\.' }
-      | each { $in | path basename | str replace -r $"($c.platform.ext.exe)$" "" })
-    let undeclared = ($actual | where { $in not-in $declared })
-    if ($undeclared | is-not-empty) {
-      print -e $"WARN ($c.spec.name): bin/ has undeclared executables: ($undeclared | str join ', '). Add them to spec.bin."
-    }
-  }
   let inv = (prune $c.out (inventory $c.out))
+  # Only the executables in spec.bin get exports.bin, and a composer such as Golconda's links only
+  # those into /usr/bin. Warn about the ones it would miss. `inv` is after prune, so a pruned entry
+  # is not warned about, and only files directly in bin/ count (not directories or nested files)
+  let undeclared = (undeclared-bin $inv (bins $c) $c.platform)
+  if ($undeclared | is-not-empty) {
+    print -e $"WARN ($c.spec.name): bin/ has undeclared executables: ($undeclared | str join ', '). Add them to spec.bin."
+  }
   layout-check $c.out
   # installed copies of source scripts carry the build env's path from prepare: not a dependency
   fix-shebangs $c.out $c.njobs --undo
@@ -157,6 +153,17 @@ def save-tree [tree: path]: nothing -> nothing {
 # `bin`, defaulting to the package's name when bin/<name> got installed
 def bins [c: record]: nothing -> list<string> {
   $c.spec.bin? | default (if ($"($c.out)/bin/($c.spec.name)($c.platform.ext.exe)" | path exists) { [$c.spec.name] } else { [] })
+}
+
+# executable names directly in bin/ that `declared` does not list. `inv` is after prune, so a
+# pruned entry is gone; directories and nested files are not bin/ entries
+# (a symlink counts: it is a name a composer would link)
+export def undeclared-bin [inv: table, declared: list<string>, platform: record]: nothing -> list<string> {
+  let ext = ($platform.ext?.exe? | default "")
+  $inv | where type in [f l] and rel =~ '^bin/[^/]+$'
+  | where { ^find $in.path -maxdepth 0 -perm -u+x | complete | get stdout | is-not-empty }
+  | get rel | each { $in | str replace -r '^bin/' '' | str replace -r $"($ext)$" '' }
+  | where { $in not-in $declared }
 }
 
 # the tree walked once, later steps filter it (toybox find has no %y)
