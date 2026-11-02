@@ -267,4 +267,10 @@ in
     inherit launch;
     nu = bootstrap.seed;
   };
+  closure = import ./closure.nix {
+    inherit baseTools;
+    platform = plat;
+    inherit launch;
+    nu = bootstrap.seed;
+  };
 }

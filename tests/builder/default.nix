@@ -99,5 +99,17 @@ mapAttrs (
       else
         { }
     )
+    // (
+      # nix/closure.nix: jq's closure as a tarball
+      if name == "closure" then
+        {
+          tarball = set.closure {
+            roots = [ set.pkgs.jq ];
+            name = "jq";
+          };
+        }
+      else
+        { }
+    )
   )
 ) tests
