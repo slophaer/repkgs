@@ -84,18 +84,6 @@ builtins.mapAttrs
       ];
       tools = [ sh ];
     };
-    kbuild = {
-      # Linux kernel kbuild: configure (defconfig + fragment + olddefconfig + verify),
-      # build (make bzImage/Image), install (vmlinuz, System.map, .config). No test phase:
-      # kernel tests are QEMU boots done separately.
-      unsupported = if platform.os != "linux" then "kernel builds only for Linux" else null;
-      phases = [
-        "configure"
-        "build"
-        "install"
-      ];
-      tools = [ sh ];
-    };
     autotools = {
       unsupported =
         if platform.libc == "msvc" then
