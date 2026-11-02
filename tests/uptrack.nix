@@ -5,6 +5,12 @@ let
   set = import ../nix/set.nix { inherit system; };
   seed = set.bootstrap.seed;
   sep = builtins.fromJSON ''"\u001e"'';
+  # pipeline.nu imports builder/sys-libs.nu relative to the repository root.
+  src = builtins.path {
+    path = ../.;
+    name = "uptrack-test-source";
+    filter = p: _: baseNameOf p != ".git";
+  };
 in
 derivation {
   name = "check-uptrack";
@@ -16,7 +22,7 @@ derivation {
   builder = "${seed}/bin/nu";
   args = [
     "--no-config-file"
-    "--include-path=${../pkgs/up/uptrack/src}${sep}${./builder/lib}"
+    "--include-path=${src}/pkgs/up/uptrack/src${sep}${./builder/lib}"
     "${./uptrack/test.nu}"
   ];
 }
