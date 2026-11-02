@@ -6,16 +6,20 @@
 # `dir`/sources.toml `[upstream] purl`, the pinned version (`version`) and the source fetch's
 # `outputHash` (`src`). `libc0` ({ name, dir } or null) is implicit in every ELF link and a bootstrap
 # stage with no package of its own, so it joins as a component read from its directory's
-# sources.toml, and in the dependsOn of each other one.
+# sources.toml, and in the dependsOn of each other one. A `wrap` package is a component of its
+# own that depends on the package it wraps.
+# A component is one derivation: two of the same name and version (variants, two sets) stay two.
+# Their bom-refs, <name>@<version>, get #<drv hash prefix> appended when they would collide.
 #
-# Approximations, all marked with a `golconda:approximation` property on the component:
-#  - a derivation without `dir` (toolchain, bootstrap stages, seed) has no sources.toml: name and
-#    derivation name only, no purl, no version, no hash
+# Approximations, each marked with a `golconda:approximation` property:
+#  - a derivation without `dir` (toolchain, bootstrap stages, seed, wrappers) has no
+#    sources.toml: name and version only, no purl, no hash
 #  - hashes are SHA-256 of the unpacked source tree (the NAR hash of what the fetch yields), not
 #    of the upstream tarball
 #  - a purl's query (uptrack's `?url=…&regex=…` of pkg:generic) is dropped
-#  - build-only tools (`buildDependencies`) are left out on purpose: they are not in the runtime
-#    closure
+#  - libc's edges are inferred, not declared
+#  - on the document: build-only tools (`buildDependencies`) are left out on purpose, they are
+#    not in the runtime closure
 {
   nu,
   system,
@@ -27,18 +31,23 @@
 }:
 let
   inherit (builtins)
+    baseNameOf
     convertHash
     elemAt
     filter
     fromTOML
     genericClosure
+    groupBy
     head
+    length
     match
     pathExists
     readFile
     sort
     split
+    substring
     toJSON
+    unsafeDiscardStringContext
     ;
 
   # a stand-in package for the libc stage, from its sources.toml
@@ -57,9 +66,10 @@ let
         dependencies = [ ];
       };
 
-  key = p: p.name;
-  # `dependencies` of a package; anything that is not a package has none
-  depsOf = p: p.dependencies or (p.args.dependencies or [ ]);
+  # one derivation, one component; the libc stand-in is no derivation
+  key = p: if p ? drvPath then unsafeDiscardStringContext p.drvPath else p.name;
+  # `dependencies` of a package, the wrapped package of a wrapper; anything else has none
+  depsOf = p: if p ? wraps then [ p.wraps ] else p.dependencies or (p.args.dependencies or [ ]);
   withLibc = if libc == null then roots else roots ++ [ libc ];
   closure = genericClosure {
     startSet = map (p: {
@@ -113,7 +123,18 @@ let
       ];
 
   isLibc = p: libc != null && key p == key libc;
-  ref = p: if p ? version then "${p.pname or p.name}@${p.version}" else key p;
+  baseRef = p: if p ? version then "${p.pname or p.name}@${p.version}" else p.name;
+  byRef = groupBy baseRef pkgsOf;
+  ref =
+    p:
+    let
+      b = baseRef p;
+    in
+    if length byRef.${b} > 1 then "${b}#${substring 0 8 (baseNameOf (key p))}" else b;
+  approximation = value: {
+    name = "golconda:approximation";
+    inherit value;
+  };
 
   component =
     p:
@@ -131,23 +152,22 @@ let
     // (if known then { purl = purlOf p t; } else { })
     // (if hashes == [ ] then { } else { inherit hashes; })
     // (
-      if known then
-        { }
-      else
-        {
-          properties = [
-            {
-              name = "golconda:approximation";
-              value = "no sources.toml purl: name from the derivation, no purl";
-            }
-          ];
-        }
+      let
+        when = c: value: if c then [ (approximation value) ] else [ ];
+        properties =
+          when (!known) "no sources.toml purl: name from the derivation, no purl"
+          ++ when (hashes != [ ]) "sha256 of the unpacked source tree (NAR hash), not of the upstream archive"
+          ++ when (known && match ".*[?].*" t.upstream.purl != null) "the sources.toml purl query is dropped"
+          ++ when (isLibc p) "implicit dependency: every ELF links it, its dependsOn edges are inferred";
+      in
+      if properties == [ ] then { } else { inherit properties; }
     );
 
   graph = map (p: {
     ref = ref p;
     dependsOn = map ref (
-      (if libc != null && !isLibc p then [ libc ] else [ ]) ++ filter (d: !isLibc d) (depsOf p)
+      (if libc != null && !isLibc p && !(p ? wraps) then [ libc ] else [ ])
+      ++ filter (d: !isLibc d) (depsOf p)
     );
   }) pkgsOf;
 
@@ -160,6 +180,9 @@ let
       inherit name;
       bom-ref = name;
     };
+    metadata.properties = [
+      (approximation "runtime graph from declared dependencies, not store references; buildDependencies left out")
+    ];
     components = sort (a: b: a.bom-ref < b.bom-ref) (map component pkgsOf);
     dependencies = [
       {
