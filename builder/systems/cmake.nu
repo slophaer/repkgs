@@ -27,7 +27,7 @@ export def configure []: nothing -> nothing {
   let c = (ctx); let o = (options cmake)
   prefix check-flags $o.flags '^(--install-prefix($|=)|(-D)?CMAKE_INSTALL_PREFIX(?::[^=]+)?(=|$))' "prefix or cmake.defs.CMAKE_INSTALL_PREFIX"
   let defs = ({
-    CMAKE_INSTALL_PREFIX: (prefix resolve)
+    CMAKE_INSTALL_PREFIX: (prefix resolve $o.defs.CMAKE_INSTALL_PREFIX?)
     CMAKE_BUILD_TYPE: "Release"
     CMAKE_INSTALL_LIBDIR: "lib"
     CMAKE_INSTALL_SBINDIR: "bin"

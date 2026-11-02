@@ -23,6 +23,10 @@ case "$name:$1" in
     *) echo "unexpected fixture command: $name $*" >&2; exit 1 ;;
 esac
 prefix=$(cat configured-prefix)
+if test "${OUTSIDE_PREFIX:-0}" = 1; then
+    mkdir -p "$DESTDIR/etc"
+    printf 'must not disappear\n' > "$DESTDIR/etc/unexpected"
+fi
 # Never let a broken installer write outside this test's temporary directory.
 if test "$prefix" != "$TEST_OUT" && test -z "${DESTDIR:-}"; then
     echo 'missing DESTDIR for a non-scratch prefix' >&2

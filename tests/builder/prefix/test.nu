@@ -23,6 +23,9 @@ for backend in [autotools meson cmake] {
     {name: root, prefix: /, override: null}
     {name: override, prefix: /usr, override: /opt/custom}
     {name: builder-only, prefix: null, override: /opt/custom}
+    {name: bad-relative, prefix: usr, override: null}
+    {name: bad-parent, prefix: /usr/../../tmp, override: null}
+    {name: bad-def, prefix: /usr, override: relative}
     {name: raw-flag, prefix: null, override: null}
     {name: raw-split, prefix: null, override: null}
     {name: raw-alias, prefix: null, override: null}
@@ -66,6 +69,11 @@ for backend in [autotools meson cmake] {
       }
       {ok: true, message: ''}
     } catch {|e| {ok: false, message: $e.msg} })
+    if ($case.name | str starts-with bad-) {
+      if $result.ok or not ($result.message | str contains 'prefix must') { error make {msg: $"($backend): invalid prefix was accepted"} }
+      print $"ok: ($backend) invalid prefix rejected"
+      continue
+    }
     if ($case.name | str starts-with raw-) {
       if $result.ok or not ($result.message | str contains 'prefix flags') { error make {msg: $"($backend): opaque prefix flag was accepted"} }
       print $"ok: ($backend) raw prefix flag rejected"
@@ -106,6 +114,25 @@ for backend in [autotools meson cmake] {
     }
     print $"ok: ($backend) prefix is in the configure cache key"
   }
+  $env.PKGS_CTX = ($env.PKGS_CTX | upsert cache false | update spec { upsert prefix /usr | update $backend { upsert flags [] } })
+  if ('install' | path exists) { rm install }
+  match $backend {
+    autotools => { autotools configure }
+    meson => { meson configure }
+    cmake => { cmake configure }
+  }
+  let outside_rejected = (with-env {OUTSIDE_PREFIX: '1'} {
+    try {
+      match $backend {
+        autotools => { autotools install }
+        meson => { meson install }
+        cmake => { cmake install }
+      }
+      false
+    } catch {|e| $e.msg | str contains 'outside the declared prefix' }
+  })
+  if not $outside_rejected { error make {msg: $"($backend): files outside the declared prefix disappeared"} }
+  print $"ok: ($backend) rejects files outside the declared prefix"
 }
 cd $pwd
 rm -rf $root

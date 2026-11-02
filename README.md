@@ -122,7 +122,9 @@ Its own `exports.json` lists the launchers it made.
 `cmake.defs.CMAKE_INSTALL_PREFIX` override the common field; configure and install use the same
 value. `/` also works. The builders make pkg-config prefixes relative in `lib`, `share` and
 multiarch directories. Use these fields, not raw configure prefix flags: those flags are rejected
-so install cannot silently use a different prefix.
+so install cannot silently use a different prefix. Prefixes must be absolute and contain no `..`
+components. An unexpected staged file outside that prefix is an error; use a package-local
+install phase to keep files from other roots.
 
 Lock files need no translation. For Cargo, Go, npm, pnpm, Yarn, Bundler, Deno, Hex, Hackage and
 LuaRocks, the lock file in the source is turned into fixed-output fetches at build time, by a
