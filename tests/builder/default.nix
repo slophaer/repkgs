@@ -111,5 +111,16 @@ mapAttrs (
       else
         { }
     )
+    // (
+      if name == "sysroot" then
+        {
+          sysrootRecipe = ../../bootstrap/sysroot.nu;
+          bootstrapLib = ../../bootstrap/lib.nu;
+          bootstrapGlob = ../../builder/glob.nu;
+          bootstrapLog = ../../builder/log.nu;
+        }
+      else
+        { }
+    )
   )
 ) tests

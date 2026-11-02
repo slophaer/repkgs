@@ -21,21 +21,20 @@ def main []: nothing -> nothing {
   let out = $env.out
   mkdir $"($out)/include" $"($out)/lib"
   for p in ($env.parts | split row " ") {
-    # The CA store deduplicates identical files via hardlinks, so a file in glibc
-    # (e.g., libunwind.so.1) may share an inode with one in runtimes. cp -s refuses
-    # to replace a symlink when source and destination resolve to the same inode,
-    # printing "'file' is 'path'". Ignore errors for files that already exist with
-    # identical content; fail on other errors.
-    let r = (^cp -rsf $"($p)/." $"($out)/" | complete)
-    if $r.exit_code != 0 {
-      # Each "'name' is 'path'" line is a hardlink conflict; other errors are fatal
-      let lines = ($r.stderr | lines)
-      let fatal = ($lines | where {|l| not ($l =~ "^cp: '.+' is '/") })
-      if ($fatal | is-not-empty) {
-        print -e ($lines | str join "\n")
-        error make {msg: $"cp failed with exit code ($r.exit_code)"}
+    # Remove old links first: cp -s rejects same-inode replacements after store optimisation.
+    mut replace = []
+    for f in (^find $p -mindepth 1 -print0 | split row (char nul) | where { $in != "" }) {
+      let dest = ($out | path join ($f | path relative-to $p))
+      if ($f | path type) == dir {
+        # Never remove files through a directory link into an input.
+        if ($dest | path type) == symlink { error make {msg: $"sysroot directory conflicts with a link: ($dest)"} }
+      } else if ($dest | path type) == symlink {
+        $replace ++= [$dest]
       }
     }
+    if ($replace | is-not-empty) { x rm -f -- ...$replace }
+    let r = (^cp -rsf $"($p)/." $"($out)/" | complete)
+    if $r.exit_code != 0 { error make {msg: $r.stderr} }
   }
   x cp -rs $env.resource $"($out)/lib/clang"
   relativize-links $out
