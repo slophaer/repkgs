@@ -113,8 +113,9 @@ the package says nothing more about them. `patches = [ ./x.patch ]` are applied 
 `bin`, a package declares its own name: jq declares `[ "jq" ]`. A package with no `bin/<name>`,
 such as the library zlib, declares `bin = [ ]`; if it does not, the build warns. A declared name
 must be installed when listed explicitly. The default is a convention, not proof of installation.
-The build also writes `bin` into `exports.json`: an inventory of what `bin/` holds. It can list more names than the declaration. A `wrap` package keeps the declaration of
-the package it wraps, and its own `exports.json` lists the launchers it made.
+The build also writes `bin` into `exports.json`: an inventory of what `bin/` holds. It can list
+more names than the declaration. A `wrap` package keeps the declaration of the package it wraps.
+Its own `exports.json` lists the launchers it made.
 
 `prefix = "/usr"` configures an image prefix in autotools, Meson and CMake. They install through
 `DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and
