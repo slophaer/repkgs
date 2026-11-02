@@ -1,5 +1,6 @@
 use ../core.nu *
 use ../build-cache.nu
+use ../prefix.nu
 use ./make.nu
 
 # autoconf configure, then make.nu's build/test/install
@@ -64,16 +65,17 @@ def unrecord-install-tool [out: string]: nothing -> nothing {
 # configure's recorded argv has no build paths. Farm packages (spec.prefix) use that prefix
 export def --env configure []: nothing -> nothing {
   let c = (ctx); let o = (options autotools)
+  prefix check-flags $o.flags '^(--prefix($|=)|prefix=)' prefix
+  let prefix = (prefix resolve)
   let script = $"(project-dir autotools)/($o.configureScript)"
   # --host: configure stops running test programs. --build only has to differ from it
   let host_flags = (if $c.platform.cross { [$"--host=($c.platform.gnuTriple)" "--build=x86_64-build-linux-gnu"] } else { [] })
   let cache = $"($c.build)/config.cache"
-  let key = (build-cache key autoconf [$script] [...$host_flags ...$o.flags])
+  let key = (build-cache key autoconf [$script] [$"--prefix=($prefix)" ...$host_flags ...$o.flags])
   note config.cache (if (build-cache restore $key $cache) { "restored" } else { "cold" })
   backports $c.src
   cp ($nu.current-exe | path dirname | path join install) (install-tool)
   # farm packages configure with their declared prefix (e.g. /usr), otherwise $out
-  let prefix = ($c.spec.prefix? | default $c.out)
   with-env {PKGS_PREFIX: $prefix, PKGS_CONFIG_CACHE: $cache, INSTALL: $"(install-tool) -c"} {
     (x $env.CONFIG_SHELL $script --disable-nls --disable-dependency-tracking --disable-static --enable-shared
       ...$host_flags ...$o.flags)
@@ -95,20 +97,6 @@ export def test []: nothing -> nothing { let o = (options autotools); make run-t
 # install. Farm packages (spec.prefix) install via DESTDIR and copy the prefix subtree to $out
 export def install []: nothing -> nothing {
   let c = (ctx); let o = (options autotools)
-  let farm_prefix = $c.spec.prefix?
-  if ($farm_prefix | is-empty) {
-    make run-install ($o.makeFlags ++ $o.installFlags) $o.installTarget
-    unrecord-install-tool $c.out
-  } else {
-    let destdir = $"($c.build)/dest"
-    with-env {DESTDIR: $destdir} { make run-install ($o.makeFlags ++ $o.installFlags) $o.installTarget }
-    # copy prefix subtree (e.g. /usr) to $out
-    let prefix_dir = ($farm_prefix | str trim --left --char '/')
-    ^cp -r $"($destdir)/($prefix_dir)/." $c.out
-    unrecord-install-tool $c.out
-    # .pc files: rewrite prefix to ${pcfiledir}/../.. so dependents find includes/libs
-    for f in (files $"($c.out)/lib/pkgconfig/*.pc") {
-      edit $f { str replace $"prefix=($farm_prefix)" "prefix=${pcfiledir}/../.." }
-    }
-  }
+  prefix install (prefix resolve) { make run-install ($o.makeFlags ++ $o.installFlags) $o.installTarget }
+  unrecord-install-tool $c.out
 }

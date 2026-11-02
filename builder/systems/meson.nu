@@ -1,4 +1,5 @@
 use ../core.nu *
+use ../prefix.nu
 
 # meson setup / compile / test / install.
 export const OPTIONS = {
@@ -51,8 +52,8 @@ def cross-files [c: record]: nothing -> list<string> {
 # Farm packages (spec.prefix set, e.g. "/usr") configure with that prefix and install via DESTDIR
 export def configure []: nothing -> nothing {
   let c = (ctx); let o = (options meson)
-  # spec.prefix for farm packages, meson.defs.prefix for manual control, otherwise $out
-  let prefix = ($c.spec.prefix? | default ($o.defs.prefix? | default $c.out))
+  prefix check-flags $o.flags '^(--prefix($|=)|(-D)?prefix=)' "prefix or meson.defs.prefix"
+  let prefix = (prefix resolve $o.defs.prefix?)
   let opts = ({
     prefix: $prefix
     libdir: "lib"
@@ -77,19 +78,5 @@ export def test []: nothing -> nothing {
 }
 # meson install. Farm packages (spec.prefix) install via DESTDIR and copy the prefix subtree to $out
 export def install []: nothing -> nothing {
-  let c = (ctx)
-  let farm_prefix = $c.spec.prefix?
-  if ($farm_prefix | is-empty) {
-    x meson install --no-rebuild
-  } else {
-    let destdir = $"($c.build)/dest"
-    with-env {DESTDIR: $destdir} { x meson install --no-rebuild }
-    # copy prefix subtree (e.g. /usr) to $out, rewriting .pc files to be relative
-    let prefix_dir = ($farm_prefix | str trim --left --char '/')
-    ^cp -r $"($destdir)/($prefix_dir)/." $c.out
-    # .pc files: rewrite prefix=/usr to ${pcfiledir}/../.. so dependents find includes/libs
-    for f in (files $"($c.out)/lib/pkgconfig/*.pc") {
-      edit $f { str replace $"prefix=($farm_prefix)" "prefix=${pcfiledir}/../.." }
-    }
-  }
+  prefix install (prefix resolve (options meson).defs.prefix?) { x meson install --no-rebuild }
 }
