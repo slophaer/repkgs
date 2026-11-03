@@ -5,6 +5,8 @@
 {
   platform,
   toolchain,
+  # runtime libc root: standalone native libc, or the early/cross sysroot with its unwinder
+  libcOut,
   launch,
   dlaudit,
   buildSystems,
@@ -19,6 +21,8 @@
 }:
 let
   elf = platform.binfmt == "elf";
+  # Native glibc is self-contained; early/cross libc still needs its merged sysroot.
+  interpRoot = if elf then libcOut else toolchain.sysroot;
   inherit (lib)
     join
     lines
@@ -108,9 +112,9 @@ let
         hardening
         ;
       inherit (toolchain) sysroot;
-      probe = if platform.cross then "${toolchain.sysroot}/lib/${platform.interp}" else "";
+      probe = if platform.cross then "${interpRoot}/lib/${platform.interp}" else "";
       # `prebuilt`: upstream ELFs get our dynamic linker implanted (true) or via launch ("ldso")
-      interp = "${toolchain.sysroot}/lib/${platform.interp}";
+      interp = "${interpRoot}/lib/${platform.interp}";
       launch =
         if elf then
           "${launch}/bin/launch"
