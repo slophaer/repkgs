@@ -4,24 +4,22 @@
 package {
   name = "bc";
 
-  # Uses custom configure.sh script, not autotools
+  # bc's own configure.sh, not autotools
   uses = [ "make" ];
-
-  # Configure with POSIX-compliant bc (no GNU extensions needed for kernel)
   make.configureScript = "./configure.sh";
   make.configureFlags = [
     "--disable-nls"
     "--disable-history"
     "--disable-man-pages"
+    "--disable-strip" # keep symbols: finish splits debug info itself
+    "--disable-generated-tests" # they compute expected results with a system bc
+    "--disable-problematic-tests" # bc error test 33.txt grew to 58 GB here (Linux overcommit)
   ];
+  make.testTarget = [ "test" ]; # bc's Makefile has no check
 
   bin = [
     "bc"
     "dc"
   ];
-  tests.run = false;
   tests.version = "bc --version";
-
-  # bc strips binaries itself, so disable debug info check
-  debug = false;
 }
