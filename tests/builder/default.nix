@@ -63,5 +63,14 @@ mapAttrs (
       else
         { }
     )
+    // (
+      # exports.json `bin`: what bin/ holds after the build
+      if name == "bin" then
+        {
+          inherit (set.pkgs) jq zlib;
+        }
+      else
+        { }
+    )
   )
 ) tests
