@@ -162,7 +162,7 @@ export def undeclared-bin [inv: table, declared: list<string>, platform: record]
   let ext = ($platform.ext?.exe? | default "")
   $inv | where type in [f l] and rel =~ '^bin/[^/]+$'
   | where { ^find $in.path -maxdepth 0 -perm -u+x | is-not-empty }
-  | get rel | each { $in | str replace -r '^bin/' '' | str replace -r $"($ext)$" '' }
+  | get rel | each { $in | str replace -r '^bin/' '' | str replace -r $"($ext | str escape-regex)$" '' }
   | where { $in not-in $declared }
 }
 
