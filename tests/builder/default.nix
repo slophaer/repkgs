@@ -162,6 +162,7 @@ mapAttrs (
         builtins.elem name [
           "sysroot"
           "unwinder"
+          "glibc-prefix-map"
         ]
       then
         {

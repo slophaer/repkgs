@@ -33,12 +33,18 @@ def patched-source []: nothing -> path {
   $src
 }
 
+# The -isystem dirs of compiler-rt and the kernel headers would otherwise reach the debug info of
+# every library, and libc would reference them: they are build inputs, not run-time dependencies.
+# Each gets its own placeholder, so a debugger can map it back
+# (gdb: set substitute-path /build-input/linux-headers <store path>)
+export def prefix-maps [rt: string, headers: string]: nothing -> list<string> {
+  [[$rt compiler-rt] [$headers linux-headers]] | each {|m| $"-ffile-prefix-map=($m.0)=/build-input/($m.1)" }
+}
+
 # CXX=false: a working c++ would make the build compile a C++ test helper against our headers.
 # The link flags sit in no-unused-arguments because configure probes with `-Werror -S`
 def configure [src: path, rt: string, sh: path]: nothing -> nothing {
-  # -isystem dirs of the headers and compiler-rt would otherwise reach the debug info of every
-  # library and make libc reference them: they are build inputs, not run-time dependencies
-  let maps = ([$rt $env.linuxHeaders] | each {|d| $"-ffile-prefix-map=($d)=/build-input" } | str join ' ')
+  let maps = (prefix-maps $rt $env.linuxHeaders | str join ' ')
   let cc = $"clang (target | str join ' ') ($maps) -resource-dir=($rt) --start-no-unused-arguments -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld --end-no-unused-arguments"
   let vars = {CONFIG_SHELL: $sh, CC: $cc, CXX: "false", BUILD_CC: "cc", LDFLAGS: $"-L($rt)/lib/($env.clangTarget)"} | merge $BINUTILS
   "with-clang = yes\n" | save configparms # sysdeps Makefiles branch on it
