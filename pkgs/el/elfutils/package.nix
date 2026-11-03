@@ -15,8 +15,12 @@ package {
     "--localedir=/"
   ];
 
-  # Disable clang -Werror for const-discard pointer casts
-  cc.cflags = [ "-Wno-error=incompatible-pointer-types-discards-qualifiers" ];
+  # elfutils builds with -Werror; clang flags const-discarding casts, and tests/varlocs.c sets a
+  # global it never reads (-Wunused-but-set-global)
+  cc.cflags = [
+    "-Wno-error=incompatible-pointer-types-discards-qualifiers"
+    "-Wno-error=unused-but-set-global"
+  ];
 
   dependencies = [
     pkgs.zlib
@@ -42,7 +46,16 @@ package {
     "eu-strip"
     "eu-unstrip"
   ];
-  tests.run = false;
+  # Expected failures with an LLVM toolchain; an XPASS fails the build, so a fix shows up:
+  #  - elflint --gnu-ld checks GNU ld output and rejects lld's (".relro_padding has wrong type:
+  #    expected RELR, is NOBITS"); the strip and reverse-sections tests run elflint on the result
+  #  - arsymtest runs `$NM -s` (GNU nm's armap flag); llvm-nm's -s takes two arguments
+  #  - getphdrnum: readelf prints e_phnum 0xffff as 65535, the expected output says -1
+  #  - backtrace-data: the unwind stops at start_thread ("data: no main")
+  autotools.testTarget = [
+    "check"
+    "XFAIL_TESTS=run-elflint-self.sh run-strip-strmerge.sh run-reverse-sections-self.sh run-arsymtest.sh run-getphdrnum.sh run-backtrace-data.sh"
+  ];
   tests.version = "eu-readelf --version";
 
   # Remove eu-make-debug-archive which has hardcoded paths to other elfutils binaries
