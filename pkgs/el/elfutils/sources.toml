@@ -1,0 +1,10 @@
+[upstream]
+purl = "pkg:gnu/elfutils"
+
+[[source]]
+key = "default"
+url = "https://sourceware.org/elfutils/ftp/{version}/elfutils-{version}.tar.bz2"
+hash = "sha256-oFThW/mwZfYxpjegIqQ6hMZzJ3jgdQ+LtpCQa8SRF2o="
+
+[pin]
+version = "0.192"
