@@ -1,0 +1,173 @@
+glibc: expand $ORIGIN from AT_EXECFN without /proc
+
+_dl_get_origin reads /proc/self/exe and, if that fails, LD_ORIGIN_PATH.
+With no /proc, as in the init of an initrd, a binary with a $ORIGIN
+RUNPATH cannot load its libraries.
+
+Save AT_EXECFN in _dl_execfn and use its directory as the last resort.
+It is the name given to execve, so resolve it as realpath does, without
+/proc: a relative one is taken from getcwd, and each component goes
+through readlinkat, a link's target walked in turn. The kernel starts
+an initrd's init as /init -> ../nix/store/.../bin/x, whose own
+directory is "/". Ignore it for setuid programs, as the environment is.
+
+--- a/sysdeps/unix/sysv/linux/dl-origin.c
++++ b/sysdeps/unix/sysv/linux/dl-origin.c
+@@ -23,6 +23,108 @@
+ #include <sysdep.h>
+ #include <fd_to_filename.h>
+ 
++#include <unistd.h>
++
++/* Directory of the executable named by AT_EXECFN, as a malloc'd absolute
++   path without trailing slash, or NULL.  AT_EXECFN is the name given to
++   execve: it may be relative, or a symbolic link, as is /init in an
++   initrd (-> ../nix/store/.../bin/x), whose directory is not that of the
++   file.  So resolve it as realpath does, without /proc: a relative name
++   is taken from getcwd, each component goes through readlink, a link's
++   target replaces it and is walked in turn, and "." and ".." are taken
++   against the prefix walked so far, which holds no links.  */
++static char *
++origin_from_execfn (void)
++{
++  const char *fn = GLRO(dl_execfn);
++  if (fn == NULL || fn[0] == '\0')
++    return NULL;
++
++  char out[PATH_MAX], rest[PATH_MAX], link[PATH_MAX];
++  size_t olen = 0, rlen = 0;
++  if (fn[0] != '/')
++    {
++      long int r = INTERNAL_SYSCALL_CALL (getcwd, rest, sizeof (rest));
++      if (r <= 1 || rest[0] != '/')
++	return NULL;
++      rlen = r - 1;
++      rest[rlen++] = '/';
++    }
++  for (size_t i = 0; fn[i] != '\0'; ++i)
++    {
++      if (rlen + 1 >= sizeof (rest))
++	return NULL;
++      rest[rlen++] = fn[i];
++    }
++
++  size_t pos = 0;
++  int links = 0;
++  while (pos < rlen)
++    {
++      while (pos < rlen && rest[pos] == '/')
++	++pos;
++      if (pos == rlen)
++	break;
++      size_t end = pos;
++      while (end < rlen && rest[end] != '/')
++	++end;
++      size_t clen = end - pos;
++      if (clen == 1 && rest[pos] == '.')
++	{
++	  pos = end;
++	  continue;
++	}
++      if (clen == 2 && rest[pos] == '.' && rest[pos + 1] == '.')
++	{
++	  while (olen > 0 && out[olen - 1] != '/')
++	    --olen;
++	  if (olen > 0)
++	    --olen;
++	  pos = end;
++	  continue;
++	}
++      if (olen + 1 + clen >= sizeof (out))
++	return NULL;
++      size_t before = olen;
++      out[olen++] = '/';
++      __mempcpy (out + olen, rest + pos, clen);
++      olen += clen;
++      out[olen] = '\0';
++      long int n = INTERNAL_SYSCALL_CALL (readlinkat, AT_FDCWD, out, link,
++					  sizeof (link) - 1);
++      if (n <= 0)
++	{
++	  pos = end;
++	  continue;
++	}
++      /* A link: what is left becomes its target followed by the rest.  */
++      if (++links > 40)
++	return NULL;
++      size_t tail = rlen - end;
++      if ((size_t) n + tail >= sizeof (link))
++	return NULL;
++      __mempcpy (link + n, rest + end, tail);
++      rlen = n + tail;
++      __mempcpy (rest, link, rlen);
++      pos = 0;
++      olen = link[0] == '/' ? 0 : before;
++    }
++
++  /* The directory: up to the last slash, "/" for a file in the root.  */
++  while (olen > 0 && out[olen - 1] != '/')
++    --olen;
++  if (olen > 0)
++    --olen;
++  if (olen == 0)
++    out[olen++] = '/';
++  char *result = malloc (olen + 1);
++  if (result == NULL)
++    return NULL;
++  __mempcpy (result, out, olen);
++  result[olen] = '\0';
++  return result;
++}
++
+ /* On Linux >= 2.1 systems which have the dcache implementation we can get
+    the path of the application from the /proc/self/exe symlink.  Try this
+    first and fall back on the generic method if necessary.  */
+@@ -55,7 +157,15 @@
+       result = (char *) -1;
+       /* We use the environment variable LD_ORIGIN_PATH.  If it is set make
+ 	 a copy and strip out trailing slashes.  */
+-      if (GLRO(dl_origin_path) != NULL)
++      if (GLRO(dl_origin_path) == NULL && !__libc_enable_secure)
++	{
++	  /* /proc is not mounted, e.g. in an initrd: use the name the
++	     kernel passed in AT_EXECFN.  */
++	  char *execfn = origin_from_execfn ();
++	  if (execfn != NULL)
++	    result = execfn;
++	}
++      else if (GLRO(dl_origin_path) != NULL)
+ 	{
+ 	  size_t len = strlen (GLRO(dl_origin_path));
+ 	  result = (char *) malloc (len + 1);
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -595,6 +595,9 @@
+   EXTERN const char *_dl_rtld_dir;
+   EXTERN size_t _dl_rtld_dirlen;
+ 
++  /* AT_EXECFN, the name the kernel was asked to execute.  */
++  EXTERN const char *_dl_execfn;
++
+   /* Size of the static TLS block.  */
+   EXTERN size_t _dl_tls_static_size;
+ 
+--- a/elf/dl-support.c
++++ b/elf/dl-support.c
+@@ -72,6 +72,7 @@
+ 
+ /* Path where the binary is found.  */
+ const char *_dl_origin_path;
++const char *_dl_execfn;
+ 
+ /* Nonzero if runtime lookup should not update the .got/.plt.  */
+ int _dl_bind_not;
+--- a/sysdeps/unix/sysv/linux/dl-parse_auxv.h
++++ b/sysdeps/unix/sysv/linux/dl-parse_auxv.h
+@@ -47,6 +47,7 @@
+   GLRO(dl_pagesize) = auxv_values[AT_PAGESZ];
+   __libc_enable_secure = auxv_values[AT_SECURE];
+   GLRO(dl_platform) = (void *) auxv_values[AT_PLATFORM];
++  GLRO(dl_execfn) = (const char *) auxv_values[AT_EXECFN];
+   GLRO(dl_hwcap) = auxv_values[AT_HWCAP];
+   GLRO(dl_hwcap2) = auxv_values[AT_HWCAP2];
+   GLRO(dl_hwcap3) = auxv_values[AT_HWCAP3];
