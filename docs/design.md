@@ -159,6 +159,10 @@ kernel-launched shebang scripts name the script in `AT_EXECFN`, and descriptor e
 name an inaccessible descriptor path. Those cases are outside the fallback's current guarantee.
 Secure execution does not use the glibc fallback.
 
+Native stage-2 libc carries its own unwinder, so applications can reference it without the
+compiler sysroot. Early stages and cross targets keep libc and the target unwinder together in
+the merged sysroot. The patched unwind pathname does not search the executable's RUNPATH.
+
 Ambient data (CA bundle, zoneinfo, fonts) is an environment variable or system path, never a
 store path.
 
