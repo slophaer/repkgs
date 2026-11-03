@@ -1,5 +1,5 @@
 # .note.dlopen: a soname a binary only dlopen()s is found through its RUNPATH, with no
-# LD_LIBRARY_PATH
+# LD_LIBRARY_PATH, from the store and from a moved copy of the closure
 use checks.nu *
 use finish.nu [dlopen-check inventory]
 
@@ -10,6 +10,20 @@ assert $"RUNPATH names zlib: ($rpath)" ($rpath =~ 'zlib/lib')
 assert $"RUNPATH is relative: ($rpath)" (not ($rpath =~ '\[/nix/store'))
 let out = (^env -i $"($env.pkg)/bin/dlz" | complete)
 assert $"dlopen finds libz in place: ($out.stdout)($out.stderr)" ($out.exit_code == 0 and ($out.stdout | str starts-with "zlib "))
+
+# moved: the package and its dependencies under another root, siblings as in the store
+let t = $"($env.TMPDIR? | default /tmp)/dlopen-test/store"
+mkdir $t
+for p in (ls /nix/store | where type == dir | get name | where { $in =~ '-(test-dlopen|zlib|glibc-[^/]*|launch-[^/]*)$' }) {
+  ^cp -a $p $t
+}
+let moved = $"($t)/($env.pkg | path basename)/bin/dlz"
+# /nix/store hidden by an empty tmpfs in a private mount namespace: only the copy can serve. sh is
+# dash, whose `test` is a builtin; mount runs before the tmpfs covers it
+let tool = {|n| which $n | get path.0 }
+let hide = $"(do $tool mount) -t tmpfs none /nix/store && test ! -e ($env.pkg) && exec ($moved)"
+let out = (^env -i (do $tool unshare) -rm (do $tool sh) -c $hide | complete)
+assert $"dlopen finds libz from a moved closure, /nix/store hidden: ($out.stdout)($out.stderr)" ($out.exit_code == 0 and ($out.stdout | str starts-with "zlib "))
 
 # the package's own shipped library: found through the $ORIGIN-relative RUNPATH
 let selfbin = (if ($"($env.pkg)/bin/.dlself" | path exists) { $"($env.pkg)/bin/.dlself" } else { $"($env.pkg)/bin/dlself" })
