@@ -33,23 +33,32 @@ def link-tree [pkg: string, out: string]: nothing -> nothing {
   }
 }
 
-# files {name: text} into share/wrap/<pname>/. A linked share/ becomes a real directory of links
+# A linked directory becomes a real one of links to the old target's entries: copy-on-write, so a
+# write below it never reaches the wrapped package (another wrapper's share/wrap/<pname> included)
+def unshare-dir [dir: string]: nothing -> nothing {
+  if ($dir | path type) == "symlink" {
+    let target = ($dir | path dirname | path join (^readlink $dir) | path expand)
+    rm $dir
+    mkdir $dir
+    for e in (ls -a $target) { ^ln -sr $e.name $"($dir)/($e.name | path basename)" }
+  } else if not ($dir | path exists) {
+    mkdir $dir
+  }
+}
+
+# files {name: text} into share/wrap/<pname>/. Each directory on the way is unshared, and a file the
+# wrapped package has there is unlinked before it is replaced
 def write-files [out: string, pname: string, files: record]: nothing -> nothing {
   if ($files | is-empty) { return }
-  let share = $"($out)/share"
-  if ($share | path type) == "symlink" {
-    let target = ($share | path dirname | path join (^readlink $share) | path expand)
-    rm $share
-    mkdir $share
-    for e in (ls $target) { ^ln -sr $e.name $"($share)/($e.name | path basename)" }
-  }
-  let dir = $"($share)/wrap/($pname)"
-  mkdir $dir
+  let dir = $"($out)/share/wrap/($pname)"
+  for d in [share share/wrap $"share/wrap/($pname)"] { unshare-dir $"($out)/($d)" }
   for f in ($files | transpose name text) {
     if $f.name in ["" "." ".."] or ($f.name | str contains "/") {
       error make {msg: $"wrap: file name '($f.name)' must be a plain name"}
     }
-    $f.text | save -f $"($dir)/($f.name)"
+    let file = $"($dir)/($f.name)"
+    if ($file | path type | is-not-empty) { rm $file }
+    $f.text | save $file
   }
 }
 
