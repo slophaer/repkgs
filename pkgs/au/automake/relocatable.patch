@@ -1,0 +1,61 @@
+--- a/bin/automake.in	2026-10-30 22:04:09.441450621 +0000
++++ b/bin/automake.in	2026-10-30 22:04:58.097424247 +0000
+@@ -24,9 +24,13 @@
+ 
+ use 5.006; use strict; use warnings;
+ 
++our $pkgs_prefix;
++
+ BEGIN
+ {
+-  unshift (@INC, '@datadir@/@PACKAGE@-@APIVERSION@')
++  use Cwd ();
++  ($pkgs_prefix = Cwd::realpath ($0)) =~ s,/[^/]*/[^/]*$,,;
++  unshift (@INC, "$pkgs_prefix/share/@PACKAGE@-@APIVERSION@")
+     unless $ENV{AUTOMAKE_UNINSTALLED};
+ 
+   # Override SHELL.  This is required on DJGPP so that system() uses
+
+--- a/bin/aclocal.in	2026-10-30 22:04:09.473451262 +0000
++++ b/bin/aclocal.in	2026-10-30 22:05:07.891620193 +0000
+@@ -21,9 +21,13 @@
+ 
+ use 5.006; use strict; use warnings;
+ 
++our $pkgs_prefix;
++
+ BEGIN
+ {
+-  unshift (@INC, '@datadir@/@PACKAGE@-@APIVERSION@')
++  use Cwd ();
++  ($pkgs_prefix = Cwd::realpath ($0)) =~ s,/[^/]*/[^/]*$,,;
++  unshift (@INC, "$pkgs_prefix/share/@PACKAGE@-@APIVERSION@")
+     unless $ENV{AUTOMAKE_UNINSTALLED};
+ }
+ 
+@@ -63,8 +67,8 @@
+ # --aclocal-path option/ACLOCAL_PATH environment variable, and reset
+ # with the '--system-acdir' option.
+ my @user_includes = ();
+-my @automake_includes = ('@datadir@/aclocal-' . $APIVERSION);
+-my @system_includes = ('@datadir@/aclocal');
++my @automake_includes = ($pkgs_prefix . '/share/aclocal-' . $APIVERSION);
++my @system_includes = ($pkgs_prefix . '/share/aclocal');
+ my $aclocal_path = '';
+ 
+ # Whether we should copy M4 file in $user_includes[0].
+
+--- a/lib/Automake/Config.in	2026-10-30 22:04:09.481451422 +0000
++++ b/lib/Automake/Config.in	2026-10-30 22:04:41.421090584 +0000
+@@ -32,7 +32,10 @@
+ our $PACKAGE_BUGREPORT = '@PACKAGE_BUGREPORT@';
+ our $VERSION = '@VERSION@';
+ our $RELEASE_YEAR = '@RELEASE_YEAR@';
+-our $libdir = $ENV{"AUTOMAKE_LIBDIR"} || '@datadir@/@PACKAGE@-@APIVERSION@';
++# relocatable: find libdir relative to this module
++use Cwd ();
++my $_base = Cwd::realpath(__FILE__) =~ s,/[^/]*/[^/]*/[^/]*/[^/]*$,,r;
++our $libdir = $ENV{"AUTOMAKE_LIBDIR"} || "$_base/share/@PACKAGE@-@APIVERSION@";
+ 
+ our $perl_threads = 0;
+ # We need at least this version for CLONE support.
