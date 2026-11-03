@@ -504,6 +504,27 @@ auto RunUncached(CacheClient& cache, const std::string& socket_path, const std::
 
 }  // namespace
 
+auto PassthroughEnabled(std::string_view value) -> bool { return value == "1"; }
+
+auto PassthroughArgs(Language lang, std::span<const std::string> user_args) -> std::vector<std::string> {
+  std::vector<std::string> args(user_args.begin(), user_args.end());
+  // c++ is a jig name; the conf's compiler is clang, which would link C++ objects as C
+  if (lang == Language::kCxx) {
+    args.insert(args.begin(), "--driver-mode=g++");
+  }
+  return args;
+}
+
+void ApplyDriverConf(Invocation& inv, const DriverConf& conf, Language lang, std::span<const std::string> user_args,
+                     bool passthrough) {
+  inv.args = passthrough ? PassthroughArgs(lang, user_args) : BuildDriverArgs(conf, lang, user_args);
+  for (const std::string& arg : inv.args) {
+    if (!std::ranges::contains(user_args, arg)) {
+      inv.key_args.push_back(arg);
+    }
+  }
+}
+
 auto ParseInvocation(std::span<const std::string> args) -> Invocation {
   Invocation inv;
   inv.args.assign(args.begin(), args.end());
@@ -583,13 +604,11 @@ auto RunCcMode(std::string_view argv0, std::span<const std::string> raw_args, co
   if (((inv.link || inv.link_one) && conf->binfmt != BinFmt::kElf) || lang == Language::kFortran) {
     inv.cacheable = false;
   }
+  // JIG_PASSTHROUGH=1 (set per command: `CC="env JIG_PASSTHROUGH=1 cc"`): only the value "1"
+  // turns it on; empty, 0, false, off and every other value keep the driver policy. For code that
+  // brings its own flags (kernel, EFI stubs)
   if (conf->present) {
-    inv.args = BuildDriverArgs(*conf, lang, user_args);
-    for (const std::string& arg : inv.args) {
-      if (!std::ranges::contains(user_args, arg)) {
-        inv.key_args.push_back(arg);
-      }
-    }
+    ApplyDriverConf(inv, *conf, lang, user_args, PassthroughEnabled(Env("JIG_PASSTHROUGH")));
   }
 
   CacheClient cache;
