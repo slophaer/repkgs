@@ -1,0 +1,24 @@
+--- a/libtoolize.in	2026-10-30 22:08:58.094222557 +0000
++++ b/libtoolize.in	2026-10-30 22:08:58.132223316 +0000
+@@ -1960,12 +1960,16 @@
+   pkgltdl_files="@pkgltdl_files@"
+   pkgmacro_files="@pkgmacro_files@"
+ 
++
+   # Locations for important files:
+-  prefix="@prefix@"
+-  datadir="@datadir@"
+-  pkgauxdir="@pkgauxdir@"
+-  pkgltdldir="@pkgdatadir@"
+-  aclocaldir="@aclocaldir@"
++  # relocatable: compute from script location
++  _lt_script_dir=$(cd "$(dirname "$0")" && pwd)
++  _lt_prefix=$(cd "$_lt_script_dir/.." && pwd)
++  prefix=$_lt_prefix
++  datadir=$_lt_prefix/share
++  pkgauxdir=$_lt_prefix/share/libtool/build-aux
++  pkgltdldir=$_lt_prefix/share/libtool
++  aclocaldir=$_lt_prefix/share/aclocal
+ 
+   # Allow the user to override the master libtoolize repository:
+   if test -n "$_lt_pkgdatadir"; then
