@@ -33,10 +33,19 @@ def patched-source []: nothing -> path {
   $src
 }
 
+# The -isystem dirs of compiler-rt and the kernel headers would otherwise reach the debug info of
+# every library, and libc would reference them: they are build inputs, not run-time dependencies.
+# Each gets its own placeholder, so a debugger can map it back
+# (gdb: set substitute-path /build-input/linux-headers <store path>)
+export def prefix-maps [rt: string, headers: string]: nothing -> list<string> {
+  [[$rt compiler-rt] [$headers linux-headers]] | each {|m| $"-ffile-prefix-map=($m.0)=/build-input/($m.1)" }
+}
+
 # CXX=false: a working c++ would make the build compile a C++ test helper against our headers.
 # The link flags sit in no-unused-arguments because configure probes with `-Werror -S`
 def configure [src: path, rt: string, sh: path]: nothing -> nothing {
-  let cc = $"clang (target | str join ' ') -resource-dir=($rt) --start-no-unused-arguments -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld --end-no-unused-arguments"
+  let maps = (prefix-maps $rt $env.linuxHeaders | str join ' ')
+  let cc = $"clang (target | str join ' ') ($maps) -resource-dir=($rt) --start-no-unused-arguments -rtlib=compiler-rt -unwindlib=none -fuse-ld=lld --end-no-unused-arguments"
   let vars = {CONFIG_SHELL: $sh, CC: $cc, CXX: "false", BUILD_CC: "cc", LDFLAGS: $"-L($rt)/lib/($env.clangTarget)"} | merge $BINUTILS
   "with-clang = yes\n" | save configparms # sysdeps Makefiles branch on it
   with-env $vars {
@@ -74,6 +83,13 @@ def c-utf8-locale [src: path, out: path]: nothing -> nothing {
   }
 }
 
+export def install-unwinder [runtimes: path, out: path]: nothing -> nothing {
+  let src = $"($runtimes)/lib/libunwind.so.1.0"
+  if not ($src | path exists) { error make {msg: $"missing bootstrap unwinder: ($src)"} }
+  x cp $src $"($out)/lib/libunwind.so.1.0"
+  x ln -s libunwind.so.1.0 $"($out)/lib/libunwind.so.1"
+}
+
 def main []: nothing -> nothing {
   let out = $env.out
   let src = (patched-source)
@@ -99,6 +115,12 @@ def main []: nothing -> nothing {
     x make ...$make
     x make ...$make install -j1 $"DESTDIR=($dest)" # parallel install races on the .dt -> .d depfile moves
     install-tree $dest $out
+    # glibc-unwind-origin.patch makes pthread_exit/pthread_cancel/backtrace dlopen
+    # $ORIGIN/libunwind.so.1. Copy the unwinder from the bootstrap runtimes so glibc
+    # is self-contained. Without it, any program calling those functions aborts.
+    if "bootstrapRuntimes" in $env {
+      install-unwinder $env.bootstrapRuntimes $out
+    }
     if $env.locale == "true" { c-utf8-locale $src $out }
   }
   cc-facts $out {include-dirs: [include]}
