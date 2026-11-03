@@ -184,10 +184,10 @@ static void die(const char* m) {
   sys(SYS_exit, 127, 0, 0, 0, 0, 0);
 }
 
-// realpath(3) without /proc or libc, for AT_EXECFN when /proc is not mounted (initrd PID 1, which
-// the kernel starts as /init -> ../nix/store/.../bin/x). A relative name is taken from the cwd.
+// realpath(3) without /proc or libc, for AT_EXECFN when /proc is not mounted (e.g. an initrd's PID 1,
+// which the kernel starts as /init -> ../nix/store/.../bin/x). A relative name is taken from the cwd.
 // Each component goes through readlink(2); a link's target replaces it and is walked in turn, so
-// a farm of links to links ends at the file. "." and ".." are taken against the prefix walked so
+// a chain of links to links ends at the file. "." and ".." are taken against the prefix walked so
 // far, which holds no links. Returns 0 and the result in `path`, or -1 with `path` unchanged
 static int resolve_symlinks(char* path, u64 pathmax) {
   char out[4096], rest[4096], link[4096];

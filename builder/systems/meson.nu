@@ -49,7 +49,7 @@ def cross-files [c: record]: nothing -> list<string> {
 }
 
 # meson setup with prefix/libdir/buildtype defaults, a generated cross file when cross, then `meson.defs`
-# Farm packages (spec.prefix set, e.g. "/usr") configure with that prefix and install via DESTDIR
+# With spec.prefix (e.g. "/usr"), configure with that prefix and install via DESTDIR
 export def configure []: nothing -> nothing {
   let c = (ctx); let o = (options meson)
   prefix check-flags $o.flags '^(--prefix($|=)|(-D)?prefix=)' "prefix or meson.defs.prefix"
@@ -76,7 +76,7 @@ export def test []: nothing -> nothing {
   if ($skip | is-not-empty) and ($names | is-empty) { note meson-test "every test matches meson.skipTests"; return }
   x meson test --no-rebuild --print-errorlogs --num-processes (test-jobs) ...$names
 }
-# meson install. Farm packages (spec.prefix) install via DESTDIR and copy the prefix subtree to $out
+# meson install. With spec.prefix, install via DESTDIR and copy the prefix subtree to $out
 export def install []: nothing -> nothing {
   prefix install (prefix resolve (options meson).defs.prefix?) { x meson install --no-rebuild }
 }

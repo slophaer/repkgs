@@ -38,9 +38,9 @@ let
       r = map (c: c.bom-ref) b.components;
     in
     builtins.length r == builtins.length (builtins.attrNames (builtins.groupBy (x: x) r));
-  # the value of each golconda:approximation property of a component
+  # the value of each repkgs:approximation property of a component
   approx =
-    c: map (p: p.value) (builtins.filter (p: p.name == "golconda:approximation") (c.properties or [ ]));
+    c: map (p: p.value) (builtins.filter (p: p.name == "repkgs:approximation") (c.properties or [ ]));
   has = re: c: builtins.any (v: match re v != null) (approx c);
   depsOf = b: ref: (builtins.head (builtins.filter (d: d.ref == ref) b.dependencies)).dependsOn;
 
@@ -106,7 +106,7 @@ assert
 assert all (has "sha256 of the unpacked source.*") (builtins.filter (c: c ? hashes) bom.components);
 assert has ".*implicit.*" (byName "glibc");
 assert builtins.any (
-  p: p.name == "golconda:approximation" && match ".*buildDependencies.*" p.value != null
+  p: p.name == "repkgs:approximation" && match ".*buildDependencies.*" p.value != null
 ) (bom.metadata.properties or [ ]);
 assert
   bzip2.purl == "pkg:generic/bzip2@${set.pkgs.bzip2.version}" && has ".*query.*dropped.*" bzip2;

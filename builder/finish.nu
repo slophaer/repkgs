@@ -17,8 +17,8 @@ export def --env main [
     if not ($"($c.out)/bin/($b)($c.platform.ext.exe)" | path exists) { error make {msg: $"bin/($b)($c.platform.ext.exe) missing in output"} }
   }
   let inv = (prune $c.out (inventory $c.out))
-  # Only the executables in spec.bin get exports.bin, and a composer such as Golconda's links only
-  # those into /usr/bin. Warn about the ones it would miss. `inv` is after prune, so a pruned entry
+  # Only the executables in spec.bin get exports.bin, and a consumer that links declared names
+  # (into a profile or a shared bin/) misses the rest. Warn about them. `inv` is after prune, so a pruned entry
   # is not warned about, and only files directly in bin/ count (not directories or nested files)
   let undeclared = (undeclared-bin $inv (bins $c) $c.platform)
   if ($undeclared | is-not-empty) {
@@ -77,7 +77,7 @@ def relativize-scripts [prefix: string]: nothing -> nothing {
 }
 
 
-# prefix -> store, anything still naming the prefix is an error (except for farm packages)
+# prefix -> store, anything still naming the prefix is an error (a declared spec.prefix may remain)
 export def to-store [prefix: string, dest: string, inv: table]: nothing -> nothing {
   ^chmod -R u+w $prefix # some install -m 0444
   relativize-text $prefix pcfiledir ($inv | where type == f and rel =~ '\.pc$' | get path)
@@ -85,9 +85,9 @@ export def to-store [prefix: string, dest: string, inv: table]: nothing -> nothi
   generic-man-prefix $prefix ($inv | where type == f and rel starts-with share/man/ | get path)
   relativize-scripts $prefix
   relativize-links $prefix $dest
-  # farm packages (spec.prefix set) are allowed to have the image prefix in their files: the
-  # symlink farm in the image serves them from that path. The scratch prefix is still rejected
-  let farm_prefix = (ctx).spec.prefix?
+  # a package with spec.prefix may name that prefix in its files: whoever installs it there serves
+  # them from that path. The scratch prefix is still rejected
+  let declared_prefix = (ctx).spec.prefix?
   let hits = (^grep -rlF $prefix $prefix | complete | get stdout | lines)
   if ($hits | is-not-empty) {
     let detail = ($hits | first 10 | each {|f|
@@ -101,11 +101,11 @@ export def to-store [prefix: string, dest: string, inv: table]: nothing -> nothi
 ($detail | str join "
 ")($more)"}
   }
-  # farm packages may have their declared prefix in files (e.g. /usr/lib/systemd): allowed
-  if ($farm_prefix | is-not-empty) {
-    let farm_hits = (^grep -rlF $farm_prefix $prefix | complete | get stdout | lines)
-    if ($farm_hits | is-not-empty) {
-      note farm-prefix $"($farm_hits | length) files contain the farm prefix ($farm_prefix)"
+  # files may name the declared prefix (e.g. /usr/lib/systemd): allowed, reported
+  if ($declared_prefix | is-not-empty) {
+    let declared_hits = (^grep -rlF $declared_prefix $prefix | complete | get stdout | lines)
+    if ($declared_hits | is-not-empty) {
+      note declared-prefix $"($declared_hits | length) files contain the declared prefix ($declared_prefix)"
     }
   }
   # a Windows store (and tar on a runner) holds no symlinks: openssl's 5600 man aliases become copies
@@ -157,7 +157,7 @@ def bins [c: record]: nothing -> list<string> {
 
 # executable names directly in bin/ that `declared` does not list. `inv` is after prune, so a
 # pruned entry is gone; directories and nested files are not bin/ entries
-# (a symlink counts: it is a name a composer would link)
+# (a symlink counts: it is a name a consumer would link)
 export def undeclared-bin [inv: table, declared: list<string>, platform: record]: nothing -> list<string> {
   let ext = ($platform.ext?.exe? | default "")
   $inv | where type in [f l] and rel =~ '^bin/[^/]+$'
@@ -247,7 +247,7 @@ def dlopen-sonames [path: string]: nothing -> list<string> {
 }
 
 # dlopen(3) of a bare soname searches the RUNPATH of the object that calls it (and no ld.so.cache
-# or LD_LIBRARY_PATH on Golconda). jig keeps a build-system -rpath dir that served no NEEDED, so a
+# or LD_LIBRARY_PATH may be available). jig keeps a build-system -rpath dir that served no NEEDED, so a
 # package gets its .note.dlopen libraries' dirs by passing them (systemd: cc.ldflags). Checked
 # after reloc-fixup: every soname a file names in .note.dlopen that a dependency or the package's
 # own lib/ has must be in a dir of its final RUNPATH, else the build fails; one neither has is

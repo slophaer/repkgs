@@ -621,8 +621,8 @@ drv
 // {
   pname = name;
   platform = platform.name;
-  # the executables the package declares, readable at evaluation time without IFD; a symlink
-  # farm links and checks duplicates with it. `bin`, else the package's name: a package that
+  # the executables the package declares, readable at evaluation time without IFD; a consumer
+  # can link these names and check duplicates with them. `bin`, else the package's name: a package that
   # installs no bin/<name> (a library) declares `bin = [ ]`. This is a declaration, not an
   # inventory: exports.json `bin` lists what bin/ holds after the build
   bin = args.bin or [ name ];

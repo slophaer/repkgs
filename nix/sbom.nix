@@ -11,7 +11,7 @@
 # A component is one derivation: two of the same name and version (variants, two sets) stay two.
 # Their bom-refs, <name>@<version>, get #<drv hash prefix> appended when they would collide.
 #
-# Approximations, each marked with a `golconda:approximation` property:
+# Approximations, each marked with a `repkgs:approximation` property:
 #  - a derivation without `dir` (toolchain, bootstrap stages, seed, wrappers) has no
 #    sources.toml: name and version only, no purl, no hash
 #  - hashes are SHA-256 of the unpacked source tree (the NAR hash of what the fetch yields), not
@@ -132,7 +132,7 @@ let
     in
     if length byRef.${b} > 1 then "${b}#${substring 0 8 (baseNameOf (key p))}" else b;
   approximation = value: {
-    name = "golconda:approximation";
+    name = "repkgs:approximation";
     inherit value;
   };
 

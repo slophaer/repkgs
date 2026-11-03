@@ -82,7 +82,7 @@ drv
   inherit (package) pname version;
   # the executables the package declares: the wrapper launches the same names
   bin = package.bin or [ ];
-  # the package this one stands in for (Golconda's merge.nix reads it)
+  # the package this one stands in for, so consumers can map the wrapper back to it
   wraps = package;
   platform = platform.name;
   supported = package.supported or true;

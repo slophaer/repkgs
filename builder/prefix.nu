@@ -1,4 +1,4 @@
-# Shared staged install for a declared image prefix, rather than the scratch output.
+# Shared staged install for a declared prefix (spec.prefix), rather than the scratch output.
 use core.nu *
 
 # Build-system defs override the common prefix, as they do for other defaults.

@@ -9,7 +9,7 @@ package {
   uses = [ "autotools" ];
   patches = [ ./relocatable.patch ];
   autotools.flags = [
-    "--disable-ltdl-install" # don't install libltdl; erofs-utils doesn't need it
+    "--disable-ltdl-install" # don't install libltdl; libtool's macros and script work without it
   ];
   # Touch the man pages so they don't get regenerated (we don't have help2man)
   phases.before."autotools.build" = [

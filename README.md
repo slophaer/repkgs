@@ -117,7 +117,7 @@ The build also writes `bin` into `exports.json`: an inventory of what `bin/` hol
 more names than the declaration. A `wrap` package keeps the declaration of the package it wraps.
 Its own `exports.json` lists the launchers it made.
 
-`prefix = "/usr"` configures an image prefix in autotools, Meson and CMake. They install through
+`prefix = "/usr"` configures a fixed install prefix in autotools, Meson and CMake. They install through
 `DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and
 `cmake.defs.CMAKE_INSTALL_PREFIX` override the common field; configure and install use the same
 value. `/` also works. The builders make pkg-config prefixes relative in `lib`, `share` and
