@@ -63,5 +63,14 @@ mapAttrs (
       else
         { }
     )
+    // (
+      if name == "prefix" then
+        assert (set.pkgs.wine.args.prefix or null) == "/usr";
+        assert !(builtins.elem "--prefix=/usr" set.pkgs.wine.args.autotools.flags);
+        assert !(builtins.elem "prefix=$(out)" (set.pkgs.wine.args.autotools.installFlags or [ ]));
+        { }
+      else
+        { }
+    )
   )
 ) tests
