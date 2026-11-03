@@ -1,0 +1,10 @@
+[upstream]
+purl = "pkg:gnu/automake"
+
+[[source]]
+key = "default"
+url = "https://mirrors.kernel.org/gnu/automake/automake-{version}.tar.xz"
+hash = "sha256-Ch0sbziD7h4YGB/2EoDtoERGQRNyYliFNP97zXidGZw="
+
+[pin]
+version = "1.18.1"
