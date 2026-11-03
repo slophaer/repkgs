@@ -18,8 +18,8 @@ package {
   ];
   # compiled-in BINDIR/LIBDIR are last-resort fallbacks, ntdll.so finds everything relative to
   # itself. A prefix that is not the store path keeps them out of the relocatability check
+  prefix = "/usr";
   autotools.flags = [
-    "--prefix=/usr"
     "--enable-nls" # here the nls/ directory (locale tables wineserver cannot start without), not gettext
     "x86_64_CC=clang"
     "--enable-archs=x86_64"
@@ -46,7 +46,6 @@ package {
     "--without-gnutls"
     "--without-unwind"
   ];
-  autotools.installFlags = [ "prefix=$(out)" ];
   # the preloader maps the loader and its PT_INTERP by hand, ours is relative with a stub entry.
   # It only pre-reserves address ranges, ntdll execs the loader directly without it
   phases.after."autotools.install" = [

@@ -69,7 +69,7 @@ def relativize-scripts [prefix: string]: nothing -> nothing {
 }
 
 
-# prefix -> store, anything still naming the prefix is an error
+# prefix -> store, anything still naming the prefix is an error (a declared spec.prefix may remain)
 export def to-store [prefix: string, dest: string, inv: table]: nothing -> nothing {
   ^chmod -R u+w $prefix # some install -m 0444
   relativize-text $prefix pcfiledir ($inv | where type == f and rel =~ '\.pc$' | get path)
@@ -77,6 +77,9 @@ export def to-store [prefix: string, dest: string, inv: table]: nothing -> nothi
   generic-man-prefix $prefix ($inv | where type == f and rel starts-with share/man/ | get path)
   relativize-scripts $prefix
   relativize-links $prefix $dest
+  # a package with spec.prefix may name that prefix in its files: whoever installs it there serves
+  # them from that path. The scratch prefix is still rejected
+  let declared_prefix = (ctx).spec.prefix?
   let hits = (^grep -rlF $prefix $prefix | complete | get stdout | lines)
   if ($hits | is-not-empty) {
     let detail = ($hits | first 10 | each {|f|
@@ -89,6 +92,13 @@ export def to-store [prefix: string, dest: string, inv: table]: nothing -> nothi
     error make {msg: $"not relocatable: ($hits | length) files name the install prefix \(shown as $out). Make the path relative to the file \(reloc.h RELOC, ${pcfiledir}, $ORIGIN) or configure it away:
 ($detail | str join "
 ")($more)"}
+  }
+  # files may name the declared prefix (e.g. /usr/lib/systemd): allowed, reported
+  if ($declared_prefix | is-not-empty) {
+    let declared_hits = (^grep -rlF $declared_prefix $prefix | complete | get stdout | lines)
+    if ($declared_hits | is-not-empty) {
+      note declared-prefix $"($declared_hits | length) files contain the declared prefix ($declared_prefix)"
+    }
   }
   # a Windows store (and tar on a runner) holds no symlinks: openssl's 5600 man aliases become copies
   if (ctx).platform.os == "windows" { ^cp -rL $prefix $dest; ^rm -rf $prefix } else { ^mv $prefix $dest }
