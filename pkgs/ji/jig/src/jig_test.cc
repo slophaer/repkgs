@@ -364,6 +364,15 @@ void TestDriverPackageFlags() {
                    "--end-no-unused-arguments", "-c", "a.cc", "-O0"}));
   out = jig::BuildDriverArgs(pkg, jig::Language::kC, V({"-shared", "-o", "x.so", "x.o", "-L."}));
   assert(jig::Join(out, " ").contains("x.o -L. -Wl,-z,x -Wl,"));
+  // a package's -rpath (dlopen'd libraries' dirs) joins the padded RUNPATH: fixup has slack for it
+  const std::string store = jig::Store::Get().dir();
+  pkg.package.ldflags = V({"-Wl,-z,x", ("-Wl,-rpath," + store + "/h-zlib/lib").c_str()});
+  std::string joined = jig::Join(jig::BuildDriverArgs(pkg, jig::Language::kC, V({"-o", "x", "x.o"})), " ");
+  assert(joined.contains("-Wl,-z,x -Wl,--undefined-version -Wl,-rpath," + store + "/h-zlib/lib/.:/sr/libc/lib/.:/_"));
+  assert(!joined.contains("-rpath," + store + "/h-zlib/lib "));
+  joined = jig::Join(jig::BuildDriverArgs(pkg, jig::Language::kC, V({"-static", "-o", "x", "x.o"})), " ");
+  assert(joined.contains("-Wl,-z,x") && !joined.contains("-rpath"));
+  pkg.package.ldflags = V({"-Wl,-z,x"});
   // the user's --build-id comes later and wins
   out = jig::BuildDriverArgs(pkg, jig::Language::kC, V({"-Wl,--build-id=none", "x.o"}));
   assert(jig::Join(out, " ").contains(

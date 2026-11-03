@@ -357,6 +357,26 @@ auto ScanUserArgs(std::span<const std::string> raw, const BinFmtPolicy& policy) 
   return user;
 }
 
+// A package's ldflags for the link. Its -rpath (the dirs of libraries it dlopen()s) goes into our
+// padded RUNPATH, which `jig fixup` has the slack to rewrite; a link without the policy (static,
+// EFI) drops it
+auto PackageLinkArgs(std::span<const std::string> ldflags, bool takes_rpath, RunpathList& runpath)
+    -> std::vector<std::string> {
+  std::vector<std::string> kept;
+  for (size_t i = 0; i < ldflags.size(); ++i) {
+    if (takes_rpath) {
+      if (std::optional<std::string> rpath = TakeRpathArg(ldflags, i)) {
+        for (const std::string& dir : Split(*rpath, ':')) {
+          runpath.Add(dir);
+        }
+        continue;
+      }
+    }
+    kept.push_back(ldflags.at(i));
+  }
+  return kept;
+}
+
 }  // namespace
 
 auto ParseDriverConf(std::string_view text, std::string_view root) -> DriverConf {
@@ -490,7 +510,7 @@ auto BuildDriverArgs(const DriverConf& conf, Language lang, std::span<const std:
   // dependency -L dirs after the build tree's own, like a system lib dir would be
   std::vector<std::string> tail;
   if (user.linking && user.have_input) {
-    tail = conf.package.ldflags;
+    tail = PackageLinkArgs(conf.package.ldflags, policy.takes_rpath, user.runpath);
     if (policy.libs != nullptr) {
       policy.libs(conf, user);
     }
