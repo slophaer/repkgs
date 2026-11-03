@@ -28,6 +28,8 @@
 {
   roots,
   name ? "sbom",
+  # Additional CycloneDX properties for each package in the runtime closure.
+  extraProperties ? (_pkg: [ ]),
 }:
 let
   inherit (builtins)
@@ -158,7 +160,8 @@ let
           when (!known) "no sources.toml purl: name from the derivation, no purl"
           ++ when (hashes != [ ]) "sha256 of the unpacked source tree (NAR hash), not of the upstream archive"
           ++ when (known && match ".*[?].*" t.upstream.purl != null) "the sources.toml purl query is dropped"
-          ++ when (isLibc p) "implicit dependency: every ELF links it, its dependsOn edges are inferred";
+          ++ when (isLibc p) "implicit dependency: every ELF links it, its dependsOn edges are inferred"
+          ++ extraProperties p;
       in
       if properties == [ ] then { } else { inherit properties; }
     );
