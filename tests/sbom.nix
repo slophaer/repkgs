@@ -32,6 +32,47 @@ let
     && c.hashes != [ ];
   refs = map (c: c.bom-ref) bom.components;
   graphOk = all (d: all (r: elem r refs) d.dependsOn) (builtins.tail bom.dependencies);
+
+  # No directory metadata: the hook must still receive the original package.
+  unrecorded = {
+    name = "unrecorded";
+    dependencies = [ set.pkgs.jq ];
+  };
+  roots = [
+    set.pkgs.jq
+    unrecorded
+  ];
+  plain = set.sbom {
+    inherit roots;
+    name = "properties";
+  };
+  empty = set.sbom {
+    inherit roots;
+    name = "properties";
+    extraProperties = _: [ ];
+  };
+  propertiesFor = p: [
+    {
+      name = "test:package";
+      value = p.name;
+    }
+    {
+      name = "test:directory";
+      value = if p ? dir then "present" else "absent";
+    }
+  ];
+  hooked = set.sbom {
+    inherit roots;
+    name = "properties";
+    extraProperties = propertiesFor;
+  };
+  componentIn = b: n: builtins.head (builtins.filter (c: c.name == n) b.components);
+  approximation = [
+    {
+      name = "golconda:approximation";
+      value = "no sources.toml purl: name from the derivation, no purl";
+    }
+  ];
 in
 assert bom.bomFormat == "CycloneDX";
 assert bom.specVersion == "1.5";
@@ -65,4 +106,27 @@ assert
           set.pkgs.oniguruma
         ];
       }).bom.components == names;
-jq
+# A default or empty hook must not change the BOM or add empty properties.
+assert all (c: !(c ? properties)) bom.components;
+assert empty.bom == plain.bom;
+assert empty.drvPath == plain.drvPath;
+assert (componentIn plain.bom "unrecorded").properties == approximation;
+# Roots, transitive packages and the implicit libc all receive their package's properties.
+assert (componentIn hooked.bom "jq").properties == propertiesFor set.pkgs.jq;
+assert (componentIn hooked.bom "oniguruma").properties == propertiesFor set.pkgs.oniguruma;
+assert
+  (componentIn hooked.bom "glibc").properties == propertiesFor {
+    name = "glibc";
+    dir = ../pkgs/gl/glibc;
+  };
+assert
+  (componentIn hooked.bom "unrecorded").properties == approximation ++ propertiesFor unrecorded;
+# Only the properties change, not component metadata, ordering, or the dependency graph.
+assert
+  hooked.bom == plain.bom
+  // {
+    components = map (
+      c: c // { inherit (componentIn hooked.bom c.name) properties; }
+    ) plain.bom.components;
+  };
+hooked

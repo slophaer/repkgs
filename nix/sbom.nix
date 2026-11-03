@@ -24,6 +24,8 @@
 {
   roots,
   name ? "sbom",
+  # Additional CycloneDX properties for each package in the runtime closure.
+  extraProperties ? (_pkg: [ ]),
 }:
 let
   inherit (builtins)
@@ -121,6 +123,19 @@ let
       t = tomlOf p;
       known = t != null && t ? upstream.purl && p ? version;
       hashes = if t == null then [ ] else hashesOf p;
+      properties =
+        (
+          if known then
+            [ ]
+          else
+            [
+              {
+                name = "golconda:approximation";
+                value = "no sources.toml purl: name from the derivation, no purl";
+              }
+            ]
+        )
+        ++ extraProperties p;
     in
     {
       type = if builtins.elem p roots then "application" else "library";
@@ -130,19 +145,7 @@ let
     // (if p ? version && p.version != "" then { inherit (p) version; } else { })
     // (if known then { purl = purlOf p t; } else { })
     // (if hashes == [ ] then { } else { inherit hashes; })
-    // (
-      if known then
-        { }
-      else
-        {
-          properties = [
-            {
-              name = "golconda:approximation";
-              value = "no sources.toml purl: name from the derivation, no purl";
-            }
-          ];
-        }
-    );
+    // (if properties == [ ] then { } else { inherit properties; });
 
   graph = map (p: {
     ref = ref p;
