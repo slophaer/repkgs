@@ -505,8 +505,8 @@ let
   ++ map (m: "use ${storeModule m}") modules;
   # each build system's OPTIONS table for prepare.nu to merge the spec over
   systemsArg = "{${join ", " (map (u: "${u}: $" + u + ".OPTIONS") uses)}}";
-  # every phase starts in a known directory: `<bs> workdir` for a build system's phases, the first
-  # build system's for inline phases and package modules. setup exports env, hence --env
+  # Build-system phases use their workdir; inline phases use the first system's (or src).
+  # Package modules manage their own cwd. setup exports env, hence --env
   workdir = if uses == [ ] then "(ctx).src" else "${builtins.head uses} workdir";
   setups = map (u: buildSystems.${u}.setup) uses;
   # also `pkg.script`: lints/package-scripts.nu has nu parse it before anything builds
