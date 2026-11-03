@@ -37,6 +37,7 @@ lib.mergeAttrsList (map forPlatform platforms)
 // prefixed "tests-" separateTests
 // prefixed "builder-" (import ../tests/builder { inherit system; })
 // {
+  bootstrap-libc = import ../tests/bootstrap-libc.nix { inherit system; };
   treefmt =
     pkgs.runCommand "treefmt-check"
       {

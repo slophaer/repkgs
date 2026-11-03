@@ -63,5 +63,23 @@ mapAttrs (
       else
         { }
     )
+    // (
+      if
+        builtins.elem name [
+          "sysroot"
+          "unwinder"
+          "glibc-prefix-map"
+        ]
+      then
+        {
+          sysrootRecipe = ../../bootstrap/sysroot.nu;
+          glibcRecipe = ../../pkgs/gl/glibc/bootstrap.nu;
+          bootstrapLib = ../../bootstrap/lib.nu;
+          bootstrapGlob = ../../builder/glob.nu;
+          bootstrapLog = ../../builder/log.nu;
+        }
+      else
+        { }
+    )
   )
 ) tests

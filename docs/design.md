@@ -150,6 +150,10 @@ content-addressed rebuilds stable (lld hashes `$out` into build ids and string o
 `$out`, and [#16477](https://github.com/NixOS/nix/pull/16477) lets a rebuild that still differs
 replace the build trace of a collected output instead of failing).
 
+Native stage-2 libc carries its own unwinder, so applications can reference it without the
+compiler sysroot. Early stages and cross targets keep libc and the target unwinder together in
+the merged sysroot. The patched unwind pathname does not search the executable's RUNPATH.
+
 Ambient data (CA bundle, zoneinfo, fonts) is an environment variable or system path, never a
 store path.
 

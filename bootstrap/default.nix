@@ -220,6 +220,7 @@ let
       libcRecipe ? null,
       libcArgs ? { },
       libcGiven ? null,
+      standaloneLibc ? false,
       linuxHeaders ? null,
       extraParts ? [ ],
       ccArgs ? { },
@@ -250,13 +251,23 @@ let
       ++ extraParts;
       runtimes = if given then null else run [ ] "runtimes" { sysroot = sysroot base; };
       full = sysroot (base ++ [ runtimes ]);
-      cc = run [ ] "cc" ({ sysroot = full; } // ccArgs);
+      # Early and cross glibc find libunwind beside libc in the merged sysroot.
+      libcOut = if standaloneLibc then libc else full;
+      cc = run [ ] "cc" (
+        {
+          sysroot = full;
+          inherit libcOut;
+        }
+        // (if runtimes == null then { } else { runtimesOut = runtimes; })
+        // ccArgs
+      );
     in
     {
       inherit
         platform
         compiler-rt
         libc
+        libcOut
         runtimes
         cc
         ;
@@ -265,16 +276,26 @@ let
 
   linuxChain =
     platform: run: ccArgs:
+    # bootstrapRuntimes: a pre-built runtimes output whose libunwind.so.1 is copied
+    # into glibc's lib/. glibc's unwind-link patch dlopens $ORIGIN/libunwind.so.1,
+    # so the unwinder must sit next to libc.so.6. stage1.runtimes provides it for
+    # the native stage2 libc. Earlier stages and cross targets keep the sysroot,
+    # where libc and its target unwinder already sit together.
+    {
+      bootstrapRuntimes ? null,
+    }:
     let
       linux-headers = run [ ] "linux-headers" { };
       c = chain {
         inherit platform run ccArgs;
         libcRecipe = "glibc";
+        standaloneLibc = bootstrapRuntimes != null;
         libcArgs = {
           linuxHeaders = linux-headers;
           # C.UTF-8 is compiled by running the fresh localedef
           locale = platform.clangTarget == buildPlatform.clangTarget;
-        };
+        }
+        // (if bootstrapRuntimes != null then { inherit bootstrapRuntimes; } else { });
         linuxHeaders = linux-headers;
       };
     in
@@ -329,7 +350,7 @@ let
         ];
         suffix = "-boot";
       };
-      c = linuxChain buildPlatform run { prebuilt = stage0.jig; };
+      c = linuxChain buildPlatform run { prebuilt = stage0.jig; } { };
       cmake = run [ c.cc ] "cmake" { inherit (c) sysroot; };
     in
     c
@@ -370,7 +391,10 @@ let
       withLaunch = c: c // { launch = run [ c.cc ] "launch" { }; };
     in
     {
-      glibc = linuxChain platform run ccArgs;
+      # native platform: copy libunwind from stage1.runtimes into glibc
+      glibc = linuxChain platform run ccArgs (
+        if platform == buildPlatform then { bootstrapRuntimes = stage1.runtimes; } else { }
+      );
       msvc = withLaunch (chain {
         inherit platform run ccArgs;
         libcGiven = sdk;
