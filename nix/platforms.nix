@@ -58,6 +58,8 @@ let
     x86_64 = {
       names = {
         kernel = "x86";
+        systemd = "x86-64";
+        uefi = "x64";
         go = "amd64";
         gyp = "x64";
         openssl = "linux-x86_64";
@@ -69,6 +71,8 @@ let
     aarch64 = {
       names = {
         kernel = "arm64";
+        systemd = "arm64";
+        uefi = "aa64";
         go = "arm64";
         gyp = "arm64";
         clang = "arm64";
@@ -81,6 +85,8 @@ let
     riscv64 = {
       names = {
         kernel = "riscv";
+        systemd = "riscv64";
+        uefi = "riscv64";
         rust = "riscv64gc";
       };
       # -mno-relax: lld 21 leaves R_RISCV_IRELATIVE addends unadjusted after relaxation, so ld.so
@@ -98,6 +104,8 @@ let
     loongarch64 = {
       names = {
         kernel = "loongarch";
+        systemd = "loongarch64";
+        uefi = "loongarch64";
         go = "loong64";
         gyp = "loong64";
       };
@@ -113,6 +121,8 @@ let
     powerpc64le = {
       names = {
         kernel = "powerpc";
+        systemd = "ppc64-le";
+        uefi = null; # no UEFI port
         go = "ppc64le";
         meson = "ppc64";
         gyp = "ppc64";
@@ -159,6 +169,10 @@ let
         gyp = null;
         clang = null; # apple triples say arm64
         openssl = null;
+        # systemd-repart --architecture and DPS partition type names; the X64 of BOOTX64.EFI. A cpu
+        # without UEFI sets its uefi to null (powerpc64le)
+        systemd = null;
+        uefi = null;
       };
       name = "${cpu}-linux";
       # three spellings of one platform, named by consumer: clang -target, configure --host

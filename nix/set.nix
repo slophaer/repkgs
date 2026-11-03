@@ -1,4 +1,5 @@
-# The package set for one platform and what it is made from: { pkgs, bootstrap, buildSystems }.
+# The package set for one platform and what it is made from:
+# { pkgs, platform, buildPkgs, bootstrap, buildSystems }.
 # default.nix is `pkgs` alone; nix/checks.nix reads the rest.
 {
   system ? builtins.currentSystem,
@@ -255,11 +256,15 @@ in
     else
       self
   );
+  # the elaborated platform record every package receives
+  platform = plat;
   inherit bootstrap buildSystems toolchain;
   # a dev shell from this set's packages (nix/mk-shell.nix): mkShell carries the set's cc
   # wrapper, mkShellNoCC does not
   inherit mkShell;
   mkShellNoCC = args: mkShell (args // { cc = false; });
+  # the build host's set: `pkgs` itself when not cross, the host-platform set when cross
+  inherit buildPkgs;
   bundle = import ./bundle.nix {
     nu = bootstrap.seed;
     tools = [ buildPkgs.formatelf ] ++ baseTools.bootstrap;
