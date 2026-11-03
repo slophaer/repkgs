@@ -35,11 +35,14 @@ def store-roots [a: record, deps: list<record>]: nothing -> list<string> {
 # header names map back to, and a prefix map so no build or store path lands in DWARF/__FILE__
 def toolchain [a: record, deps: list<record>]: nothing -> record {
   let mask = {|p: string, under: string| $"($p)=/($under)/($p | path basename | str substring 33..)" }
+  # aclocal macros from build tools (automake, libtool, pkgconf) and runtime deps
+  let build_aclocal = ($a.buildDependencies | each {|p| (exports-of $p).aclocalDirs | each {|d| $"($p)/($d)"} } | flatten)
+  let deps_aclocal = (dep-dirs $deps aclocalDirs)
   {
     CC: cc, CXX: c++, AR: llvm-ar, RANLIB: llvm-ranlib, NM: llvm-nm, STRIP: llvm-strip
     PKG_CONFIG_PATH: (dep-dirs $deps pkgconfigDirs | str join ":")
     CMAKE_PREFIX_PATH: ($deps | get root | str join ";")
-    ACLOCAL_PATH: (dep-dirs $deps aclocalDirs | str join ":")
+    ACLOCAL_PATH: ($build_aclocal ++ $deps_aclocal | str join ":")
     JIG_LOG: $"($env.NIX_BUILD_TOP)/jig.log"
     JIG_LOG_ARGS: $"($env.NIX_BUILD_TOP)/jig-uncached.log"
     JIG_STORE_IDENTITY: content
