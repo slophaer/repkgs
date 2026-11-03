@@ -515,6 +515,16 @@ auto PassthroughArgs(Language lang, std::span<const std::string> user_args) -> s
   return args;
 }
 
+void ApplyDriverConf(Invocation& inv, const DriverConf& conf, Language lang, std::span<const std::string> user_args,
+                     bool passthrough) {
+  inv.args = passthrough ? PassthroughArgs(lang, user_args) : BuildDriverArgs(conf, lang, user_args);
+  for (const std::string& arg : inv.args) {
+    if (!std::ranges::contains(user_args, arg)) {
+      inv.key_args.push_back(arg);
+    }
+  }
+}
+
 auto ParseInvocation(std::span<const std::string> args) -> Invocation {
   Invocation inv;
   inv.args.assign(args.begin(), args.end());
@@ -595,18 +605,10 @@ auto RunCcMode(std::string_view argv0, std::span<const std::string> raw_args, co
     inv.cacheable = false;
   }
   // JIG_PASSTHROUGH=1 (set per command: `CC="env JIG_PASSTHROUGH=1 cc"`): only the value "1"
-  // turns it on; empty, 0, false, off and every other value keep the driver policy. It skips the
-  // policy flags (hardening, sysroot, RUNPATH, interpreter, prefix map), not the observation ones:
-  // the depfile jig adds to learn the inputs, and the language driver mode a c++ link needs. For
-  // code that brings its own flags (kernel, EFI stubs). The compile cache still applies.
+  // turns it on; empty, 0, false, off and every other value keep the driver policy. For code that
+  // brings its own flags (kernel, EFI stubs)
   if (conf->present) {
-    inv.args = PassthroughEnabled(Env("JIG_PASSTHROUGH")) ? PassthroughArgs(lang, user_args)
-                                                          : BuildDriverArgs(*conf, lang, user_args);
-    for (const std::string& arg : inv.args) {
-      if (!std::ranges::contains(user_args, arg)) {
-        inv.key_args.push_back(arg);
-      }
-    }
+    ApplyDriverConf(inv, *conf, lang, user_args, PassthroughEnabled(Env("JIG_PASSTHROUGH")));
   }
 
   CacheClient cache;
