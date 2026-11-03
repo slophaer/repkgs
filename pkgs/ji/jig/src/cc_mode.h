@@ -14,6 +14,9 @@
 #include <string>
 #include <vector>
 
+#include "driver.h"
+#include "keys.h"
+
 namespace jig {
 
 struct Invocation {
@@ -37,6 +40,21 @@ struct Invocation {
 };
 
 auto ParseInvocation(std::span<const std::string> args) -> Invocation;
+
+// JIG_PASSTHROUGH: only the value "1" turns it on. Empty, "0", "false", "off" and every other
+// value keep the driver policy.
+auto PassthroughEnabled(std::string_view value) -> bool;
+
+// The raw compiler's arguments for passthrough: the build system's words, plus the language driver
+// mode a c++ link needs (the conf's compiler is clang, not clang++).
+auto PassthroughArgs(Language lang, std::span<const std::string> user_args) -> std::vector<std::string>;
+
+// The compiler's arguments and the words that join the cache key: the conf's policy around the build
+// system's words, or with passthrough only those words (plus a c++ link's driver mode). Passthrough
+// skips the policy flags (hardening, sysroot, RUNPATH, interpreter, prefix map), not the depfile jig
+// adds to learn the inputs, so the compile cache still applies, under a key of its own.
+void ApplyDriverConf(Invocation& inv, const DriverConf& conf, Language lang, std::span<const std::string> user_args,
+                     bool passthrough);
 
 auto RunCcMode(std::string_view argv0, std::span<const std::string> raw_args, const std::string& socket_path) -> int;
 
