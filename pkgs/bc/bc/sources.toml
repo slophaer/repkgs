@@ -1,0 +1,11 @@
+# Modern bc by Gavin Howard - no dependencies on ed/readline
+[upstream]
+purl = "pkg:github/gavinhoward/bc"
+
+[[source]]
+key = "default"
+url = "https://github.com/gavinhoward/bc/releases/download/{version}/bc-{version}.tar.xz"
+hash = "sha256-CpyzVAbardLE6np9YgqCYdkvRpPiDvsP44BXYGdZhIk="
+
+[pin]
+version = "7.1.0"
