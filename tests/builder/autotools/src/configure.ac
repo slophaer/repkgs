@@ -1,0 +1,7 @@
+AC_INIT([hello], [1.0])
+AM_INIT_AUTOMAKE([foreign])
+LT_INIT
+AC_PROG_CC
+PKG_CHECK_MODULES([ZLIB], [zlib])
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT
