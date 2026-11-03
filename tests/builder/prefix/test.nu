@@ -29,9 +29,11 @@ for backend in [autotools meson cmake] {
     {name: raw-flag, prefix: null, override: null}
     {name: raw-split, prefix: null, override: null}
     {name: raw-alias, prefix: null, override: null}
+    {name: raw-abbrev, prefix: null, override: null}
   ] {
     if $backend == autotools and $case.override != null { continue }
-    if $case.name == raw-alias and $backend != cmake { continue }
+    if $case.name == raw-alias and $backend == meson { continue }
+    if $case.name == raw-abbrev and $backend != autotools { continue }
     let dir = $"($root)/($backend)-($case.name)"
     mkdir $"($dir)/source" $"($dir)/build" $"($dir)/out"
     $body | save $"($dir)/source/configure"
@@ -48,7 +50,9 @@ for backend in [autotools meson cmake] {
         meson => ['-D' 'prefix=/opt/raw']
         autotools => ['prefix=/opt/raw']
       }
-    } else if $case.name == raw-alias { ['--install-prefix=/opt/raw'] } else {
+    } else if $case.name == raw-alias {
+      [(if $backend == autotools { '-prefix=/opt/raw' } else { '--install-prefix=/opt/raw' })]
+    } else if $case.name == raw-abbrev { ['--pref=/opt/raw'] } else {
       [(if $backend == cmake { '-DCMAKE_INSTALL_PREFIX=/opt/raw' } else { '--prefix=/opt/raw' })]
     }
     let options = if ($case.name | str starts-with raw-) { $opts | upsert flags $flags } else { $opts }

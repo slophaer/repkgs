@@ -65,7 +65,7 @@ def unrecord-install-tool [out: string]: nothing -> nothing {
 # configure's recorded argv has no build paths. Farm packages (spec.prefix) use that prefix
 export def --env configure []: nothing -> nothing {
   let c = (ctx); let o = (options autotools)
-  prefix check-flags $o.flags '^(--prefix($|=)|prefix=)' prefix
+  prefix check-flags $o.flags '^((-prefix|--(p|pr|pre|pref|prefi|prefix))($|=)|prefix=)' prefix
   let prefix = (prefix resolve)
   let script = $"(project-dir autotools)/($o.configureScript)"
   # --host: configure stops running test programs. --build only has to differ from it
