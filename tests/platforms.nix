@@ -30,11 +30,9 @@ let
       uefi = null; # no UEFI port
     };
   };
-  actual = builtins.mapAttrs (
-    cpu: _: {
-      inherit (platforms.byName."${cpu}-linux".names) systemd uefi;
-    }
-  ) expected;
+  actual = builtins.mapAttrs (cpu: _: {
+    inherit (platforms.byName."${cpu}-linux".names) systemd uefi;
+  }) expected;
   # a new cpu with a -linux platform must state both names here too
   linuxCpus = builtins.map (n: builtins.replaceStrings [ "-linux" ] [ "" ] n) (
     builtins.filter (n: builtins.match ".*-linux" n != null) (builtins.attrNames platforms.byName)
