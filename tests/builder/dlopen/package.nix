@@ -19,7 +19,10 @@ package {
   ];
   dependencies = [ pkgs.zlib ];
   cc.ldflags = [ "-Wl,-rpath,${pkgs.zlib}/lib" ];
-  bin = [ "dlz" "dlself" ];
+  bin = [
+    "dlz"
+    "dlself"
+  ];
   # prints "zlib 1.x"
   tests.version = "dlz";
 }
