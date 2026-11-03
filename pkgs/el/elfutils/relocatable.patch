@@ -1,0 +1,11 @@
+--- a/src/Makefile.in
++++ b/src/Makefile.in
+@@ -577,7 +577,7 @@ AM_LDFLAGS = -Wl,-rpath-link,../libelf:../libdw $(STACK_USAGE_NO_ERROR)
+ noinst_LIBRARIES = libar.a
+ libar_a_SOURCES = arlib.c arlib2.c arlib-argp.c
+ EXTRA_DIST = arlib.h debugpred.h make-debug-archive.in
+-bin_SCRIPTS = make-debug-archive
++bin_SCRIPTS = 
+ @BUILD_STATIC_FALSE@libasm = ../libasm/libasm.so
+ @BUILD_STATIC_TRUE@libasm = ../libasm/libasm.a
+ @BUILD_STATIC_FALSE@libdw = ../libdw/libdw.so
