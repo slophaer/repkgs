@@ -1,4 +1,5 @@
 use ../core.nu *
+use ../prefix.nu
 
 # meson setup / compile / test / install.
 export const OPTIONS = {
@@ -48,10 +49,13 @@ def cross-files [c: record]: nothing -> list<string> {
 }
 
 # meson setup with prefix/libdir/buildtype defaults, a generated cross file when cross, then `meson.defs`
+# With spec.prefix (e.g. "/usr"), configure with that prefix and install via DESTDIR
 export def configure []: nothing -> nothing {
   let c = (ctx); let o = (options meson)
+  prefix check-flags $o.flags '^(--prefix($|=)|(-D)?prefix=)' "prefix or meson.defs.prefix"
+  let prefix = (prefix resolve $o.defs.prefix?)
   let opts = ({
-    prefix: $c.out
+    prefix: $prefix
     libdir: "lib"
     sbindir: "bin"
     buildtype: "plain"  # cc brings -O2 -g itself
@@ -72,5 +76,7 @@ export def test []: nothing -> nothing {
   if ($skip | is-not-empty) and ($names | is-empty) { note meson-test "every test matches meson.skipTests"; return }
   x meson test --no-rebuild --print-errorlogs --num-processes (test-jobs) ...$names
 }
-# meson install
-export def install []: nothing -> nothing { x meson install --no-rebuild }
+# meson install. With spec.prefix, install via DESTDIR and copy the prefix subtree to $out
+export def install []: nothing -> nothing {
+  prefix install (prefix resolve (options meson).defs.prefix?) { x meson install --no-rebuild }
+}
