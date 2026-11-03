@@ -109,6 +109,10 @@ Dependencies are found through the ordinary search paths (`-I`, `-L`, pkg-config
 the package says nothing more about them. `patches = [ ./x.patch ]` are applied after unpacking.
 `bin = [ "rg" ]` names the executables when they differ from the package name.
 
+`exports.json` lists in `bin` the executables `bin/` holds after the build, without hidden
+launchers, Windows DLLs or the platform's executable suffix. A consumer that links names reads
+them there.
+
 Lock files need no translation. For Cargo, Go, npm, pnpm, Yarn, Bundler, Deno, Hex, Hackage and
 LuaRocks, the lock file in the source is turned into fixed-output fetches at build time, by a
 dynamic derivation, with the hashes the lock file already has. Where it has none (Go, Hackage,
