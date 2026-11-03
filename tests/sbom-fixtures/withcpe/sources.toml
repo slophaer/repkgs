@@ -1,0 +1,7 @@
+# A record for tests/sbom.nix: a purl and a CPE template ({version} is the package's version).
+[upstream]
+purl = "pkg:generic/withcpe"
+cpe = "cpe:2.3:a:example:withcpe:{version}:*:*:*:*:*:*:*"
+
+[pin]
+version = "1.2"
