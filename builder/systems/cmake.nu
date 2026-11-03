@@ -1,5 +1,6 @@
 use ../core.nu *
 use ../build-cache.nu
+use ../prefix.nu
 
 const SYSROOT_LIBS = path self ./sysroot-libs.cmake
 
@@ -24,8 +25,9 @@ export def workdir []: nothing -> string { (ctx).build }
 # cmake -G Ninja with prefix/libdir/prefix-path/shared/testing defaults, cross system + emulator, then `cmake.defs`
 export def configure []: nothing -> nothing {
   let c = (ctx); let o = (options cmake)
+  prefix check-flags $o.flags '^(--install-prefix($|=)|(-D)?CMAKE_INSTALL_PREFIX(?::[^=]+)?(=|$))' "prefix or cmake.defs.CMAKE_INSTALL_PREFIX"
   let defs = ({
-    CMAKE_INSTALL_PREFIX: $c.out
+    CMAKE_INSTALL_PREFIX: (prefix resolve $o.defs.CMAKE_INSTALL_PREFIX?)
     CMAKE_BUILD_TYPE: "Release"
     CMAKE_INSTALL_LIBDIR: "lib"
     CMAKE_INSTALL_SBINDIR: "bin"
@@ -47,11 +49,12 @@ export def configure []: nothing -> nothing {
   # build cache: CMakeCache.txt's INTERNAL entries (check_*, try_compile, pkg_check_modules) become
   # the next same-key build's initial cache. The key pins sources, flags, dependencies and prefix,
   # so they are carried whole, paths included
-  let key = (build-cache key cmake (files $"($srcdir)/**/{CMakeLists.txt,*.cmake}"))
+  let def_args = ($defs | items {|k, v| $"-D($k)=(render $v)" })
+  let key = (build-cache key cmake (files $"($srcdir)/**/{CMakeLists.txt,*.cmake}") ($def_args ++ $o.flags))
   let init = $"($c.build)/probe-init.cmake"
   let had = (build-cache restore $key $init)
   note cmake-probes (if $had { "restored" } else { "cold" })
-  x cmake -S $srcdir -B . -G $o.generator ...(if $had { [-C $init] } else { [] }) ...($defs | items {|k, v| $"-D($k)=(render $v)" }) ...$o.flags
+  x cmake -S $srcdir -B . -G $o.generator ...(if $had { [-C $init] } else { [] }) ...$def_args ...$o.flags
   if not $had {
     internal-entries (open --raw CMakeCache.txt)
       # not cmake's own: those follow from our -D flags and toolchain file
@@ -70,7 +73,9 @@ export def test []: nothing -> nothing {
   x ctest --output-on-failure -j (test-jobs) ...$exclude
 }
 # cmake --install
-export def install []: nothing -> nothing { x cmake --install . }
+export def install []: nothing -> nothing {
+  prefix install (prefix resolve (options cmake).defs.CMAKE_INSTALL_PREFIX?) { x cmake --install . }
+}
 
 # the INTERNAL entries of a CMakeCache.txt, parsed as cmState::ParseCacheEntry does
 # (`"key":` when the key has a colon, trailing blanks dropped, 'quoted ' values unwrapped)
