@@ -68,12 +68,12 @@ export def write-exports [out: string, spec: record, platform: record, deps: lis
 }
 
 # list executable names in bin/ (the user-facing launchers, not .foo hidden binaries)
-def list-bin [out: path, platform: record]: nothing -> list<string> {
+export def list-bin [out: path, platform: record]: nothing -> list<string> {
   let bindir = $"($out)/bin"
   if not ($bindir | path exists) { return [] }
   let ext = ($platform.ext?.exe? | default "")
   ls $bindir | get name | where { ($in | path basename) !~ '^\.' }
-  | each { $in | path basename | str replace -r $"($ext)$" "" }
+  | each { $in | path basename | str replace -r $"($ext | str escape-regex)$" "" }
 }
 
 # dependencies our .pc files (Requires) and cmake configs (find_dependency) name: a consumer

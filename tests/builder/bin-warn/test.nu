@@ -1,6 +1,8 @@
 # finish's bin warning: regular executable files directly in bin/ that spec.bin does not declare.
-# Directories, nested files and entries prune removes are not warned about.
+# Directories, nested files and entries prune removes are not warned about. exports.json's bin
+# inventory strips the executable suffix the same way.
 use finish.nu [inventory prune undeclared-bin]
+use exports.nu [list-bin]
 use checks.nu *
 
 let root = $"($env.TMPDIR? | default /tmp)/bin-warn-check"
@@ -27,5 +29,6 @@ for name in [annexe tool.exe] {
   chmod +x $"($windows)/bin/($name)"
 }
 assert "strip the literal exe suffix only" ((undeclared-bin (inventory $windows) [] {ext: {exe: '.exe'}} | sort) == [annexe tool])
+assert "exports.json bin strips the literal exe suffix only" ((list-bin $windows {ext: {exe: '.exe'}} | sort) == [annexe tool])
 rm -rf $root
 done
