@@ -1,5 +1,6 @@
 use ../core.nu *
 use ../build-cache.nu
+use ../prefix.nu
 use ./make.nu
 
 # autoconf configure, then make.nu's build/test/install
@@ -61,18 +62,21 @@ def unrecord-install-tool [out: string]: nothing -> nothing {
 }
 
 # ./configure. Prefix, cache file and INSTALL through the environment (nix/config.site), so
-# configure's recorded argv has no build paths
+# configure's recorded argv has no build paths. A declared spec.prefix replaces $out as prefix
 export def --env configure []: nothing -> nothing {
   let c = (ctx); let o = (options autotools)
+  prefix check-flags $o.flags '^((-prefix|--(p|pr|pre|pref|prefi|prefix))($|=)|prefix=)' prefix
+  let prefix = (prefix resolve)
   let script = $"(project-dir autotools)/($o.configureScript)"
   # --host: configure stops running test programs. --build only has to differ from it
   let host_flags = (if $c.platform.cross { [$"--host=($c.platform.gnuTriple)" "--build=x86_64-build-linux-gnu"] } else { [] })
   let cache = $"($c.build)/config.cache"
-  let key = (build-cache key autoconf [$script] [...$host_flags ...$o.flags])
+  let key = (build-cache key autoconf [$script] [$"--prefix=($prefix)" ...$host_flags ...$o.flags])
   note config.cache (if (build-cache restore $key $cache) { "restored" } else { "cold" })
   backports $c.src
   cp ($nu.current-exe | path dirname | path join install) (install-tool)
-  with-env {PKGS_PREFIX: $c.out, PKGS_CONFIG_CACHE: $cache, INSTALL: $"(install-tool) -c"} {
+  # configure with the declared prefix (e.g. /usr), otherwise $out
+  with-env {PKGS_PREFIX: $prefix, PKGS_CONFIG_CACHE: $cache, INSTALL: $"(install-tool) -c"} {
     (x $env.CONFIG_SHELL $script --disable-nls --disable-dependency-tracking --disable-static --enable-shared
       ...$host_flags ...$o.flags)
   }
@@ -90,8 +94,9 @@ def stub-gnulib-tests [build: string]: nothing -> nothing {
 
 export def build []: nothing -> nothing { let o = (options autotools); make run-build $o.makeFlags $o.buildTarget }
 export def test []: nothing -> nothing { let o = (options autotools); make run-test $o.makeFlags $o.testTarget }
+# install. With spec.prefix, install via DESTDIR and copy the prefix subtree to $out
 export def install []: nothing -> nothing {
-  let o = (options autotools)
-  make run-install ($o.makeFlags ++ $o.installFlags) $o.installTarget
-  unrecord-install-tool (ctx).out
+  let c = (ctx); let o = (options autotools)
+  prefix install (prefix resolve) { make run-install ($o.makeFlags ++ $o.installFlags) $o.installTarget }
+  unrecord-install-tool $c.out
 }
