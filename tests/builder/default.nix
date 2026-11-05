@@ -64,74 +64,18 @@ mapAttrs (
         { }
     )
     // (
-      # nix/wrap.nix: the wrapped output's name carries the version, `wraps` names the package
-      if name == "wrap" then
-        let
-          inner = set.pkgs.test-tz;
-          wrapped = set.wrap { package = inner; };
-        in
-        assert wrapped.wraps == inner && wrapped.version == inner.version && wrapped.pname == inner.pname;
-        {
-          inherit wrapped;
-          wrappedName = wrapped.name;
-          wrappedWant = "${inner.pname}-${inner.version}-wrap";
-        }
-      else
-        { }
-    )
-    // (
-      # wrap with files, an argv prefix and env; apostrophes must pass through unchanged
-      if name == "wrap-files" then
-        {
-          wrapped = set.wrap {
-            package = set.pkgs.test-wrap-files;
-            files."a.conf" = "hello";
-            files."it's.conf" = "say 'hi'\n";
-            argv = [
-              "--conf"
-              "{root}/share/wrap/test-wrap-files/a.conf"
-              "it's"
-            ];
-            env.OUTER.set = "o'k";
-          };
-        }
-      else
-        { }
-    )
-    // (
-      # a wrapper over packages whose bin/ entries have launch records of their own
-      if name == "wrap-chain" then
-        let
-          inner = set.pkgs.test-wrap-files;
-          wrapped = set.wrap {
-            package = inner;
-            argv = [ "--outer" ];
-            env.OUTER.set = "outer";
-          };
-        in
-        {
-          inherit wrapped;
-          wrappedBin = builtins.toJSON (wrapped.bin or null);
-          innerBin = builtins.toJSON inner.bin;
-        }
-      else
-        { }
-    )
-    // (
       # declared executables (pkg.bin, at evaluation) against what bin/ holds (exports.json)
       if name == "bin" then
         let
           inherit (set.pkgs) jq zlib;
-          wrapped = set.wrap { package = jq; };
         in
         assert set.pkgs.oniguruma.bin == [ "onig-config" ];
         assert set.pkgs.test-tz.bin == [ "tz" ];
         assert set.pkgs.test-tz.args.tests.version == false;
         {
-          inherit jq wrapped;
+          inherit jq;
           jqBin = builtins.toJSON jq.bin;
           zlibBin = builtins.toJSON zlib.bin;
-          wrappedBin = builtins.toJSON (wrapped.bin or null);
         }
       else
         { }
@@ -142,18 +86,6 @@ mapAttrs (
         assert !(builtins.elem "--prefix=/usr" set.pkgs.wine.args.autotools.flags);
         assert !(builtins.elem "prefix=$(out)" (set.pkgs.wine.args.autotools.installFlags or [ ]));
         { }
-      else
-        { }
-    )
-    // (
-      # nix/closure.nix: jq's closure as a tarball
-      if name == "closure" then
-        {
-          tarball = set.closure {
-            roots = [ set.pkgs.jq ];
-            name = "jq";
-          };
-        }
       else
         { }
     )

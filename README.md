@@ -114,8 +114,7 @@ the package says nothing more about them. `patches = [ ./x.patch ]` are applied 
 such as the library zlib, declares `bin = [ ]`; if it does not, the build warns. A declared name
 must be installed when listed explicitly. The default is a convention, not proof of installation.
 The build also writes `bin` into `exports.json`: an inventory of what `bin/` holds. It can list
-more names than the declaration. A `wrap` package keeps the declaration of the package it wraps.
-Its own `exports.json` lists the launchers it made.
+more names than the declaration.
 
 `prefix = "/usr"` configures a fixed install prefix in autotools, Meson and CMake. They install through
 `DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and

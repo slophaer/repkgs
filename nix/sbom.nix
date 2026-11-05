@@ -6,13 +6,12 @@
 # `dir`/sources.toml `[upstream] purl`, the pinned version (`version`) and the source fetch's
 # `outputHash` (`src`). `libc0` ({ name, dir } or null) is implicit in every ELF link and a bootstrap
 # stage with no package of its own, so it joins as a component read from its directory's
-# sources.toml, and in the dependsOn of each other one. A `wrap` package is a component of its
-# own that depends on the package it wraps.
+# sources.toml, and in the dependsOn of each other one.
 # A component is one derivation: two of the same name and version (variants, two sets) stay two.
 # Their bom-refs, <name>@<version>, get #<drv hash prefix> appended when they would collide.
 #
 # Approximations, each marked with a `repkgs:approximation` property:
-#  - a derivation without `dir` (toolchain, bootstrap stages, seed, wrappers) has no
+#  - a derivation without `dir` (toolchain, bootstrap stages, seed) has no
 #    sources.toml: name and version only, no purl, no hash
 #  - hashes are SHA-256 of the unpacked source tree (the NAR hash of what the fetch yields), not
 #    of the upstream tarball
@@ -70,8 +69,8 @@ let
 
   # one derivation, one component; the libc stand-in is no derivation
   key = p: if p ? drvPath then unsafeDiscardStringContext p.drvPath else p.name;
-  # `dependencies` of a package, the wrapped package of a wrapper; anything else has none
-  depsOf = p: if p ? wraps then [ p.wraps ] else p.dependencies or (p.args.dependencies or [ ]);
+  # `dependencies` of a package; anything else has none
+  depsOf = p: p.dependencies or (p.args.dependencies or [ ]);
   withLibc = if libc == null then roots else roots ++ [ libc ];
   closure = genericClosure {
     startSet = map (p: {
@@ -169,8 +168,7 @@ let
   graph = map (p: {
     ref = ref p;
     dependsOn = map ref (
-      (if libc != null && !isLibc p && !(p ? wraps) then [ libc ] else [ ])
-      ++ filter (d: !isLibc d) (depsOf p)
+      (if libc != null && !isLibc p then [ libc ] else [ ]) ++ filter (d: !isLibc d) (depsOf p)
     );
   }) pkgsOf;
 

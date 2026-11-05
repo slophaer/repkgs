@@ -261,12 +261,6 @@ in
     tools = [ buildPkgs.formatelf ] ++ baseTools.bootstrap;
     tree = ../builder;
   };
-  wrap = import ./wrap.nix {
-    inherit baseTools;
-    platform = plat;
-    inherit launch;
-    nu = bootstrap.seed;
-  };
   # sbom { roots = [ pkgs.jq ]; name = "jq"; }: CycloneDX 1.5 of the packages' sources (nix/sbom.nix)
   sbom = import ./sbom.nix {
     nu = bootstrap.seed;
@@ -280,11 +274,5 @@ in
           name = "glibc";
           dir = ../pkgs/gl/glibc;
         };
-  };
-  closure = import ./closure.nix {
-    inherit baseTools;
-    platform = plat;
-    inherit launch;
-    nu = bootstrap.seed;
   };
 }
