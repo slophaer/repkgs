@@ -1,10 +1,19 @@
-# pkg.bin is what a package declares, at evaluation; exports.json `bin` is what bin/ holds after
-# the build. A declared name must be installed. A library declares none.
+# exports.json `bin`: the executables bin/ holds after the build, for consumers that link names.
 use checks.nu *
-let jq_bin = ($env.jqBin | from json)
-assert $"jq declares jq by default: ($jq_bin)" ($jq_bin == ["jq"])
-assert $"zlib declares no executables: ($env.zlibBin)" (($env.zlibBin | from json) == [])
-let inv = (open $"($env.jq)/exports.json" | get bin)
-assert $"jq's inventory holds its declaration: ($inv)" ($jq_bin | all { $in in $inv })
-for b in $jq_bin { assert $"bin/($b) installed" ($"($env.jq)/bin/($b)" | path exists) }
+use exports.nu [list-bin]
+let jq = (open $"($env.jq)/exports.json" | get bin)
+assert $"jq's inventory: ($jq)" ($jq == ["jq"])
+let zlib = (open $"($env.zlib)/exports.json" | get bin)
+assert $"zlib installs no executables: ($zlib)" ($zlib == [])
+# the platform's executable suffix is literal text, and hidden entries are not listed
+let root = $"($env.TMPDIR? | default /tmp)/bin-inventory"
+rm -rf $root
+mkdir $"($root)/bin"
+for name in [annexe tool.exe .hidden.exe] {
+  "fixture" | save $"($root)/bin/($name)"
+  chmod +x $"($root)/bin/($name)"
+}
+assert "strip the literal exe suffix only" ((list-bin $root {ext: {exe: '.exe'}} | sort) == [annexe tool])
+assert "no suffix on unix" ((list-bin $root {ext: {exe: ''}} | sort) == [annexe tool.exe])
+rm -rf $root
 done

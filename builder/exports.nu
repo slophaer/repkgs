@@ -57,13 +57,8 @@ export def write-exports [out: string, spec: record, platform: record, deps: lis
   let exports = ($exports | update propagate { $in ++ (required-deps $out $deps $exports) | uniq })
   let rel = {|s| $s | str replace -a $out "{root}" | str replace -a $env.NIX_STORE "{store}" }
   let exports = (if ($exports.dllDirs | is-empty) { $exports | reject dllDirs } else { $exports | update dllDirs { each { do $rel $in } } })
-  # bin: the inventory, what bin/ holds (not hidden launchers). pkg.bin, the declaration, is
-  # `bin` or else the name: without `bin`, the name must be installed or pkg.bin is wrong
-  let bin = (list-bin $out $platform)
-  if $spec.bin? == null and $spec.name not-in $bin {
-    print -e $"WARN ($spec.name): pkg.bin names bin/($spec.name), which is not installed. Declare bin = [ ] or the real names."
-  }
-  let exports = ($exports | insert bin $bin)
+  # bin: what bin/ holds after the build (not hidden launchers), for consumers that link names
+  let exports = ($exports | insert bin (list-bin $out $platform))
   $exports | to json | save -f $"($out)/exports.json"
 }
 

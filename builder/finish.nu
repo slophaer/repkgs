@@ -17,13 +17,6 @@ export def --env main [
     if not ($"($c.out)/bin/($b)($c.platform.ext.exe)" | path exists) { error make {msg: $"bin/($b)($c.platform.ext.exe) missing in output"} }
   }
   let inv = (prune $c.out (inventory $c.out))
-  # Only the executables in spec.bin get exports.bin, and a consumer that links declared names
-  # (into a profile or a shared bin/) misses the rest. Warn about them. `inv` is after prune, so a pruned entry
-  # is not warned about, and only files directly in bin/ count (not directories or nested files)
-  let undeclared = (undeclared-bin $inv (bins $c) $c.platform)
-  if ($undeclared | is-not-empty) {
-    print -e $"WARN ($c.spec.name): bin/ has undeclared executables: ($undeclared | str join ', '). Add them to spec.bin."
-  }
   layout-check $c.out
   # installed copies of source scripts carry the build env's path from prepare: not a dependency
   fix-shebangs $c.out $c.njobs --undo
@@ -153,17 +146,6 @@ def save-tree [tree: path]: nothing -> nothing {
 # `bin`, defaulting to the package's name when bin/<name> got installed
 def bins [c: record]: nothing -> list<string> {
   $c.spec.bin? | default (if ($"($c.out)/bin/($c.spec.name)($c.platform.ext.exe)" | path exists) { [$c.spec.name] } else { [] })
-}
-
-# executable names directly in bin/ that `declared` does not list. `inv` is after prune, so a
-# pruned entry is gone; directories and nested files are not bin/ entries
-# (a symlink counts: it is a name a consumer would link)
-export def undeclared-bin [inv: table, declared: list<string>, platform: record]: nothing -> list<string> {
-  let ext = ($platform.ext?.exe? | default "")
-  $inv | where type in [f l] and rel =~ '^bin/[^/]+$'
-  | where { ^find $in.path -maxdepth 0 -perm -u+x | is-not-empty }
-  | get rel | each { $in | str replace -r '^bin/' '' | str replace -r $"($ext | str escape-regex)$" '' }
-  | where { $in not-in $declared }
 }
 
 # the tree walked once, later steps filter it (toybox find has no %y)

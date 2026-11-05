@@ -621,11 +621,6 @@ drv
 // {
   pname = name;
   platform = platform.name;
-  # the executables the package declares, readable at evaluation time without IFD; a consumer
-  # can link these names and check duplicates with them. `bin`, else the package's name: a package that
-  # installs no bin/<name> (a library) declares `bin = [ ]`. This is a declaration, not an
-  # inventory: exports.json `bin` lists what bin/ holds after the build
-  bin = args.bin or [ name ];
   # what package.nix wrote and read, for `variant`
   args = args0;
   sources = sources0;

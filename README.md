@@ -109,12 +109,8 @@ Dependencies are found through the ordinary search paths (`-I`, `-L`, pkg-config
 the package says nothing more about them. `patches = [ ./x.patch ]` are applied after unpacking.
 `bin = [ "rg" ]` names the executables when they differ from the package name.
 
-`bin` is a declaration, and `pkg.bin` reads it at evaluation time without building. Without
-`bin`, a package declares its own name: jq declares `[ "jq" ]`. A package with no `bin/<name>`,
-such as the library zlib, declares `bin = [ ]`; if it does not, the build warns. A declared name
-must be installed when listed explicitly. The default is a convention, not proof of installation.
-The build also writes `bin` into `exports.json`: an inventory of what `bin/` holds. It can list
-more names than the declaration.
+`exports.json` lists in `bin` the executables `bin/` holds after the build, without hidden
+launchers or the platform's executable suffix. A consumer that links names reads them there.
 
 `prefix = "/usr"` configures a fixed install prefix in autotools, Meson and CMake. They install through
 `DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and

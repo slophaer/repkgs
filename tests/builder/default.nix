@@ -64,18 +64,10 @@ mapAttrs (
         { }
     )
     // (
-      # declared executables (pkg.bin, at evaluation) against what bin/ holds (exports.json)
+      # exports.json `bin`: what bin/ holds after the build
       if name == "bin" then
-        let
-          inherit (set.pkgs) jq zlib;
-        in
-        assert set.pkgs.oniguruma.bin == [ "onig-config" ];
-        assert set.pkgs.test-tz.bin == [ "tz" ];
-        assert set.pkgs.test-tz.args.tests.version == false;
         {
-          inherit jq;
-          jqBin = builtins.toJSON jq.bin;
-          zlibBin = builtins.toJSON zlib.bin;
+          inherit (set.pkgs) jq zlib;
         }
       else
         { }

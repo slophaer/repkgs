@@ -18,7 +18,7 @@ assert
   || throw "elfutils: linked libraries must use the target platform";
 assert builtins.stringLength cross.drvPath > 0;
 assert
-  builtins.all (b: builtins.elem b pkg.bin) [
+  builtins.all (b: builtins.elem b pkg.args.bin) [
     "eu-addr2line"
     "eu-elfclassify"
     "eu-unstrip"
@@ -27,7 +27,7 @@ assert
 derivation {
   name = "check-elfutils";
   inherit system pkg;
-  declared = builtins.toJSON pkg.bin;
+  declared = builtins.toJSON pkg.args.bin;
   __contentAddressed = true;
   outputHashMode = "recursive";
   outputHashAlgo = "sha256";
