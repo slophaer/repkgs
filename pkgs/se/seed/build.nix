@@ -176,7 +176,14 @@ let
     ${pkgs.lib.concatStringsSep "\n" (
       pkgs.lib.mapAttrsToList (n: p: "cp ${p}/bin/${n} $out/bin/") tools
     )}
-    cp ${tools.bison}/bin/yacc $out/bin/ 2>/dev/null || true
+    # bison's own yacc script execs bison by its absolute build-time path. Run the bison beside
+    # it, with its data and m4 found beside it too unless the caller sets them (bootstrap does)
+    cat > $out/bin/yacc <<'EOF'
+    #!/bin/sh
+    d=$(dirname "$0")
+    BISON_PKGDATADIR=''${BISON_PKGDATADIR:-$d/../share/bison} M4=''${M4:-$d/m4} exec "$d/bison" -y "$@"
+    EOF
+    chmod +x $out/bin/yacc
     cp -r ${tools.bison}/share/bison $out/share/bison
     cp -L ${python}/bin/python3 $out/bin/python3
     cp -r ${python}/lib/python3.* $out/lib/
