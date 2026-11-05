@@ -72,6 +72,53 @@ let
     inherit (set.pkgs.jq) dir version;
     dependencies = [ ];
   };
+  # A CPE template in sources.toml becomes the component's cpe, the version filled in.
+  withcpe = {
+    name = "withcpe-1.2";
+    pname = "withcpe";
+    version = "1.2";
+    dir = ./sbom-fixtures/withcpe;
+    dependencies = [ ];
+  };
+  cpeBom =
+    (set.sbom {
+      roots = [
+        withcpe
+        set.pkgs.jq
+      ];
+      name = "cpe";
+    }).bom;
+  cpeOf = n: (builtins.head (builtins.filter (c: c.name == n) cpeBom.components)).cpe or null;
+  # extraFields adds whole fields (here CycloneDX pedigree) to a component; it may not replace one
+  # the generator sets.
+  pedigree = {
+    ancestors = [
+      {
+        type = "library";
+        name = "jq";
+        version = "0";
+      }
+    ];
+    notes = "test";
+  };
+  fielded =
+    (set.sbom {
+      roots = [ set.pkgs.jq ];
+      name = "fields";
+      extraFields = p: if (p.pname or null) == "jq" then { inherit pedigree; } else { };
+    }).bom;
+  fieldedAt = n: builtins.head (builtins.filter (c: c.name == n) fielded.components);
+  replacing =
+    field:
+    !(builtins.tryEval (
+      builtins.deepSeq
+        (set.sbom {
+          roots = [ set.pkgs.jq ];
+          name = "replacing";
+          extraFields = _: { ${field} = "x"; };
+        }).bom.components
+        true
+    )).success;
   roots = [
     set.pkgs.jq
     set2.pkgs.oniguruma
@@ -167,6 +214,29 @@ assert
 assert !(has ".*query.*" (byName "jq"));
 # same-name variants stay apart
 assert builtins.length onigs == 2 && uniqueRefs vbom;
+# A CPE template becomes the cpe with the version; no template, no cpe.
+assert cpeOf "withcpe" == "cpe:2.3:a:example:withcpe:1.2:*:*:*:*:*:*:*";
+assert cpeOf "jq" == null;
+# extraFields adds a field to the components it returns one for, and nothing else changes.
+assert (fieldedAt "jq").pedigree == pedigree;
+assert !((fieldedAt "oniguruma") ? pedigree);
+assert
+  fielded == (set.sbom {
+    roots = [ set.pkgs.jq ];
+    name = "fields";
+  }).bom
+  // {
+    components =
+      map (c: if c.name == "jq" then c // { inherit pedigree; } else c)
+        (set.sbom {
+          roots = [ set.pkgs.jq ];
+          name = "fields";
+        }).bom.components;
+  };
+# a field the generator sets cannot be replaced, properties included (extraProperties appends)
+assert replacing "purl";
+assert replacing "bom-ref";
+assert replacing "properties";
 # Default and empty hooks retain current properties and omit an empty property list.
 assert empty.bom == plain.bom;
 assert empty.drvPath == plain.drvPath;

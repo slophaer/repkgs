@@ -10,6 +10,14 @@
 # A component is one derivation: two of the same name and version (variants, two sets) stay two.
 # Their bom-refs, <name>@<version>, get #<drv hash prefix> appended when they would collide.
 #
+# A `cpe` in `[upstream]` becomes the component's `cpe`, `{version}` replaced by the version
+# (nixpkgs' meta.identifiers.cpe is the model).
+#
+# Callers add to a component with two hooks: `extraProperties p` returns properties appended to
+# its own, and `extraFields p` returns whole CycloneDX fields (`pedigree`, `supplier`, …) merged
+# in. A field the generator sets (type, bom-ref, name, version, purl, cpe, hashes, properties)
+# cannot be replaced: that fails, so a hook cannot change a component's identity.
+#
 # Approximations, each marked with a `repkgs:approximation` property:
 #  - a derivation without `dir` (toolchain, bootstrap stages, seed) has no
 #    sources.toml: name and version only, no purl, no hash
@@ -29,6 +37,8 @@
   name ? "sbom",
   # Additional CycloneDX properties for each package in the runtime closure.
   extraProperties ? (_pkg: [ ]),
+  # Additional CycloneDX fields for each package in the runtime closure (not the generator's own).
+  extraFields ? (_pkg: { }),
 }:
 let
   inherit (builtins)
@@ -137,32 +147,62 @@ let
     inherit value;
   };
 
+  # the caller's fields, after a check that none replaces one of the generator's
+  ownFields = [
+    "type"
+    "bom-ref"
+    "name"
+    "version"
+    "purl"
+    "cpe"
+    "hashes"
+    "properties"
+  ];
+  withFields =
+    p: c:
+    let
+      extra = extraFields p;
+      clash = builtins.filter (f: builtins.elem f ownFields) (builtins.attrNames extra);
+    in
+    if clash == [ ] then
+      c // extra
+    else
+      throw "sbom: extraFields for ${p.name} sets ${builtins.concatStringsSep ", " clash}, a field the generator owns; use extraProperties for properties";
+
   component =
     p:
     let
       t = tomlOf p;
       known = t != null && t ? upstream.purl && p ? version;
       hashes = if t == null then [ ] else hashesOf p;
+      cpe =
+        if t != null && t ? upstream.cpe && p ? version then
+          builtins.replaceStrings [ "{version}" ] [ p.version ] t.upstream.cpe
+        else
+          null;
     in
-    {
-      type = if builtins.elem p roots then "application" else "library";
-      bom-ref = ref p;
-      name = p.pname or p.name;
-    }
-    // (if p ? version && p.version != "" then { inherit (p) version; } else { })
-    // (if known then { purl = purlOf p t; } else { })
-    // (if hashes == [ ] then { } else { inherit hashes; })
-    // (
-      let
-        when = c: value: if c then [ (approximation value) ] else [ ];
-        properties =
-          when (!known) "no sources.toml purl: name from the derivation, no purl"
-          ++ when (hashes != [ ]) "sha256 of the unpacked source tree (NAR hash), not of the upstream archive"
-          ++ when (known && match ".*[?].*" t.upstream.purl != null) "the sources.toml purl query is dropped"
-          ++ when (isLibc p) "implicit dependency: every ELF links it, its dependsOn edges are inferred"
-          ++ extraProperties p;
-      in
-      if properties == [ ] then { } else { inherit properties; }
+    withFields p (
+      {
+        type = if builtins.elem p roots then "application" else "library";
+        bom-ref = ref p;
+        name = p.pname or p.name;
+      }
+      // (if p ? version && p.version != "" then { inherit (p) version; } else { })
+      // (if known then { purl = purlOf p t; } else { })
+      // (if cpe == null then { } else { inherit cpe; })
+      // (if hashes == [ ] then { } else { inherit hashes; })
+      // (
+        let
+          when = c: value: if c then [ (approximation value) ] else [ ];
+          properties =
+            when (!known) "no sources.toml purl: name from the derivation, no purl"
+            ++ when (hashes != [ ]) "sha256 of the unpacked source tree (NAR hash), not of the upstream archive"
+            ++ when (known && match ".*[?].*" t.upstream.purl != null) "the sources.toml purl query is dropped"
+            ++ when (isLibc p) "implicit dependency: every ELF links it, its dependsOn edges are inferred"
+            ++ extraProperties p;
+        in
+        if properties == [ ] then { } else { inherit properties; }
+      )
     );
 
   graph = map (p: {
