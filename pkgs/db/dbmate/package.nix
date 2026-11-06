@@ -14,6 +14,8 @@ package {
   uses = [ "go" ];
   go.packages = [ "." ];
   buildDependencies = [ buildPkgs.sqlite ]; # tests dump schemas through the sqlite3 cli
+  # `dbmate dump` runs sqlite3 (pkg/driver/sqlite/sqlite.go): sqlite's bin/ on the launcher's PATH
+  sysTools = [ "sqlite" ];
   go.testPackages = [
     "./pkg/dbutil/..."
     "./pkg/driver/sqlite/..."
