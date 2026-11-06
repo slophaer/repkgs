@@ -108,6 +108,9 @@ package {
 Dependencies are found through the ordinary search paths (`-I`, `-L`, pkg-config, cmake), so
 the package says nothing more about them. `patches = [ ./x.patch ]` are applied after unpacking.
 `bin = [ "rg" ]` names the executables when they differ from the package name.
+Libraries in `[pin] sys` (written by uptrack from the lock files) are linked, not run: a launcher
+puts an ordinary dependency's `bin/` on `PATH`, but not theirs. `sysTools = [ "sqlite" ]` names
+the ones whose programs the package runs at run time.
 
 `exports.json` lists in `bin` the executables `bin/` holds after the build, without hidden
 launchers, Windows DLLs or the platform's executable suffix. A consumer that links names reads

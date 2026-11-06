@@ -15,10 +15,11 @@ use core.nu *
 use exports.nu [dep-closure]
 
 # The env part of a package's launch records, the same for all of its bin/ entries:
-# PATH gets every direct dependency that has a bin/ (propagated packages are libraries, not
-# runtime tools). Each dependency's `exports.env`, including transitively propagated ones,
-# become defaults. Direct deps override propagated values for the same key.
-def runtime-env [deps: list<string>, out: string]: nothing -> record {
+# PATH gets every direct dependency that has a bin/, except the libraries in `libs` (propagated
+# packages and [pin] sys libraries are libraries, not runtime tools). Each dependency's
+# `exports.env`, including transitively propagated ones, become defaults. Direct deps override
+# propagated values for the same key.
+def runtime-env [deps: list<string>, libs: list<string>, out: string]: nothing -> record {
   # env: follow propagate transitively. Propagated packages merge first, then the direct
   # dependencies in their declared order, so a direct dependency wins over a propagated one and
   # the order among direct dependencies stays what it was before propagate was followed.
@@ -27,8 +28,8 @@ def runtime-env [deps: list<string>, out: string]: nothing -> record {
   let direct = ($deps | each {|d| $closure | where root == $d | first })
   let exported = ($propagated ++ $direct | each {|d| $d.env } | reduce -f {} {|it, acc| $acc | merge $it }
     | items {|k, v| [$k {default: (storerel $v $out)}] } | into record)
-  # PATH: direct deps only, not propagated (propagate is for libraries, not bin/ tools)
-  let path = ($deps | where { $"($in)/bin" | path exists } | each {|d| storerel $"($d)/bin" $out })
+  # PATH: direct deps only, not propagated and not sys (both are libraries, not bin/ tools)
+  let path = ($deps | where {|d| $d not-in $libs and ($"($d)/bin" | path exists) } | each {|d| storerel $"($d)/bin" $out })
   (if ($path | is-empty) { {} } else { {PATH: {prepend: $path}} }) | merge $exported
 }
 
@@ -139,12 +140,21 @@ def pe [c: record, deps: list<string>, renv: record]: nothing -> nothing {
   }
 }
 
+# The roots of the [pin] sys libraries among the dependencies, except those `sysTools` names: a
+# package that runs a library's program (dbmate runs sqlite3) puts that library's bin/ on PATH
+def sys-libs [c: record]: nothing -> list<string> {
+  let sys = ($c.spec.sys? | default [])
+  let tools = ($c.spec.sysTools? | default [])
+  $c.deps | where {|d| $d.name in $sys and $d.name not-in $tools } | get root
+}
+
 export def main [c: record]: nothing -> nothing {
   let a = (attrs)
-  if $c.platform.binfmt == "coff" { return (pe $c $a.dependencies (runtime-env $a.dependencies $c.out)) }
+  let libs = (sys-libs $c)
+  if $c.platform.binfmt == "coff" { return (pe $c $a.dependencies (runtime-env $a.dependencies $libs $c.out)) }
   let bindir = $"($c.out)/bin"
   if not ($bindir | path exists) { return }
-  let renv = (runtime-env $a.dependencies $c.out)
+  let renv = (runtime-env $a.dependencies $libs $c.out)
   let owners = ([$c.out] ++ $a.dependencies)
   # not what write-launcher already made, not sibling aliases (python3 -> python3.14)
   let entries = (ls -a $bindir | get name | where {|f| ($f | path basename) !~ '^\.' and ($f | path exists) and not ($"($bindir)/.($f | path basename).launch" | path exists) })
