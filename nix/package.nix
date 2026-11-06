@@ -64,6 +64,7 @@ let
     "buildDependencies"
     "dependencies"
     "sys"
+    "sysTools"
     "bin"
     "tests"
     "exports"
@@ -347,6 +348,8 @@ let
       fail "unknown build systems ${toString unknownUses} (have: ${toString (attrNames buildSystems)})"
     else if unknownFields != [ ] || unknownPlatformKeys != [ ] then
       fail "unknown fields ${toString (unknownFields ++ map (k: "platforms.${k}") unknownPlatformKeys)}"
+    else if strayTools != [ ] then
+      fail "sysTools ${toString strayTools}: not in [pin] sys (sysTools names the sys libraries whose programs the package runs)"
     else if wrongPlatform != [ ] then
       fail (join "; " wrongPlatform)
     else
@@ -536,6 +539,9 @@ let
   debug = args.debug or (prebuilt == false);
   # [pin] sys of sources.toml. null: no sources.toml, dependencies are all by hand
   sys = args.sys or (if sources == null then null else sources.sys);
+  # sys libraries add no PATH entry to the launchers (builder/launchers.nu), except these: the
+  # ones whose programs the package runs at run time (dbmate runs sqlite3)
+  strayTools = filter (n: !(elem n (if sys == null then [ ] else sys))) (args.sysTools or [ ]);
   spec =
     removeAttrs args [
       "source"

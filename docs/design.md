@@ -122,7 +122,9 @@ is an error, not the old tarball. Archives are unpacked once into the store.
   package.nix adds those the set has on the platform as ordinary dependencies, so eval, `info`,
   `supported` and overrides see them, and ripgrep's package.nix still never lists pcre2. The
   build system checks the lock against `sys`, so a lock that gained a -sys crate since is an
-  error naming `repkgs update`, not a vendored copy.
+  error naming `repkgs update`, not a vendored copy. They are libraries: their `bin/` stays off
+  the launchers' `PATH` (their `exports.env` still applies), unless `sysTools` names them because
+  the package runs one of their programs (dbmate runs `sqlite3`).
 - **Autoconf** probe results that are platform facts are pinned in `nix/config.site`.
 
 ## Relocatable outputs

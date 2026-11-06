@@ -108,6 +108,9 @@ package {
 Dependencies are found through the ordinary search paths (`-I`, `-L`, pkg-config, cmake), so
 the package says nothing more about them. `patches = [ ./x.patch ]` are applied after unpacking.
 `bin = [ "rg" ]` names the executables when they differ from the package name.
+Libraries in `[pin] sys` (written by uptrack from the lock files) are linked, not run: a launcher
+puts an ordinary dependency's `bin/` on `PATH`, but not theirs. `sysTools = [ "sqlite" ]` names
+the ones whose programs the package runs at run time.
 
 Lock files need no translation. For Cargo, Go, npm, pnpm, Yarn, Bundler, Deno, Hex, Hackage and
 LuaRocks, the lock file in the source is turned into fixed-output fetches at build time, by a
