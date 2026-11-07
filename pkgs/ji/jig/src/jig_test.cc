@@ -421,6 +421,32 @@ void TestDepInfo() {
   assert(info.inputs == V({(cwd + "/src/lib.rs").c_str(), (cwd + "/src/m.rs").c_str()}));
 }
 
+// A cached dep-info names the store paths of the build that made it (a vendored crate's source).
+// A hit in another build (another Cargo.lock, so another cargo-vendor store path) must write this
+// build's: cargo reads the files a dep-info lists, and a missing one rebuilds the crate. The rlib
+// is not text, it comes back as it was
+void TestRustcDepfileReplay() {
+  const jig::Store& store = jig::Store::Get();
+  const std::string other = store.dir() + "/" + std::string(jig::kStoreHashLength, 'a') +
+                            std::string(kVendor).substr(std::string(kVendor).find('-'));
+  const fs::path tmp = fs::temp_directory_path() / ("jig-rustc-replay-" + std::to_string(::getpid()));
+  const fs::path from = tmp / "from";
+  const fs::path into = tmp / "into";
+  fs::create_directories(from);
+  fs::create_directories(into);
+  const std::string rule = other + "/dep-1.0.0/src/lib.rs";
+  const std::string depinfo = "deps/dep-aaaa.d: " + rule + "\n\n" + rule + ":\n# env-dep:X\n";
+  const std::string rlib = "rlib naming " + rule + "\n";
+  assert(WriteFile(from / "dep-aaaa.d", depinfo) && WriteFile(from / "libdep-aaaa.rlib", rlib));
+  const std::vector<std::string> paths{(from / "dep-aaaa.d").string(), (from / "libdep-aaaa.rlib").string()};
+  const std::string blob = jig::PackFiles(paths, "-aaaa");
+  assert(jig::UnpackFiles(blob, into, "-bbbb"));
+  const std::string vendored = std::string(kVendor) + "/dep-1.0.0/src/lib.rs";
+  assert(jig::ReadFile(into / "dep-bbbb.d") == "deps/dep-aaaa.d: " + vendored + "\n\n" + vendored + ":\n# env-dep:X\n");
+  assert(jig::ReadFile(into / "libdep-bbbb.rlib") == rlib);
+  fs::remove_all(tmp);
+}
+
 void TestRustInvocation() {
   jig::RustInvocation inv = jig::ParseRustInvocation(V({
       "--crate-name",
@@ -699,6 +725,7 @@ auto main() -> int {
   TestDriverPackageFlags();
   TestDriverLink();
   TestDepInfo();
+  TestRustcDepfileReplay();
   TestRustInvocation();
   TestGoCache();
   TestBinaryImage();

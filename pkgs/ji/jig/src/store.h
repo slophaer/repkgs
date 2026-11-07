@@ -44,6 +44,11 @@ class Store {
   [[nodiscard]] auto MaskForReplay(std::string text) const -> std::string {
     return by_content_ ? MaskHashes(std::move(text)) : text;
   }
+  // MaskForReplay undone for this build: the same text with every store path of an earlier build
+  // pointing at this build's root of that name. What a replayed depfile has to go through
+  [[nodiscard]] auto ResolveForReplay(std::string text) const -> std::string {
+    return by_content_ ? ResolveAll(std::move(text)) : text;
+  }
   // Our own output's store hash swapped for a fixed placeholder of the same width, and back. A
   // package embeds its prefix (-DOPENSSLDIR="$out/…", config.h's STARTPERL) and that hash moves
   // whenever any dependency does. Same width, so objects, .rodata and DWARF stay valid either way
