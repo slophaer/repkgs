@@ -41,6 +41,23 @@ struct Invocation {
 
 auto ParseInvocation(std::span<const std::string> args) -> Invocation;
 
+// Whether a source or an included file may read another file the depfile does not name. The
+// assembler's `.incbin` and `.include` do: clang writes `t.o: t.S` for a `.S` that embeds
+// data.bin or includes data.inc, so the key never sees a change of that file (LLVM does not
+// implement `as -MD`, llvm/llvm-project#54996). Matches `incbin` and the word `.include` in any case,
+// in an assembly file or in the asm string of a C file; a C++ member such as `.IncludeLoc` is not
+// the directive. The C preprocessor's `#include` has no dot and stays out: its files are in the
+// depfile. Comments do not count: the preprocessor drops them before the assembler sees the text
+// (LLVM's MCTargetOptions.h and x86's nospec-branch.h name the directives in comments, and nearly
+// every compile includes them). A compile whose inputs say true is never stored or replayed.
+auto MentionsIncbin(std::string_view text) -> bool;
+// The same for text that is not preprocessed (a .s source): comments count too.
+auto MentionsIncbinVerbatim(std::string_view text) -> bool;
+// The same for the arguments the build system passed: `-DEMBED=.incbin`, `-Wa,...`, `-Xassembler`
+// all carry assembler text. All arguments are scanned, not a list of options: a missed option
+// would replay stale data, and a false hit (a path with the word in it) costs one compile.
+auto ArgsMentionIncbin(std::span<const std::string> args) -> bool;
+
 // JIG_PASSTHROUGH: only the value "1" turns it on. Empty, "0", "false", "off" and every other
 // value keep the driver policy.
 auto PassthroughEnabled(std::string_view value) -> bool;

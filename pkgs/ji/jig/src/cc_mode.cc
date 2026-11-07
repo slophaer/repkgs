@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
@@ -366,6 +367,15 @@ auto CompileAndStore(CacheClient& cache, const std::string& compiler, const Requ
   const bool links = inv.link_one || inv.link;
   const auto [run, dep_text, link_dep_text, inputs, absent] = RunObserved(cache, compiler, inv);
 
+  // an included file may hold the .incbin (the source was checked before the lookup). Whatever the
+  // assembler read is unknown, for a failure too ("Could not find incbin file" must not outlive the file)
+  if (std::ranges::any_of(
+          inputs, [](const std::string& input) -> bool { return MentionsIncbin(ReadFile(input).value_or("")); })) {
+    ForwardStdout(inv, run.status == 0 ? ReadFile(inv.output) : std::nullopt);
+    LogOutcome("cc", Outcome::kPlainCompile, inv.source, clock);
+    return run.status;
+  }
+
   if (run.status != 0) {
     ForwardStdout(inv, std::nullopt);
     // replayable only if every input is known. A missing header or any link error depends on
@@ -587,6 +597,92 @@ auto ParseInvocation(std::span<const std::string> args) -> Invocation {
   return inv;
 }
 
+namespace {
+auto ContainsNoCase(std::string_view text, std::string_view word) -> bool {
+  return !std::ranges::search(text, word, [](char have, char want) -> bool {
+            return std::tolower(static_cast<unsigned char>(have)) == want;
+          }).empty();
+}
+
+// `.include` as a whole word: a C++ member such as `.IncludeLoc` or `.includes` is not it
+auto ContainsDirectiveNoCase(std::string_view text, std::string_view word) -> bool {
+  const auto same_letter = [](char have, char want) -> bool {
+    return std::tolower(static_cast<unsigned char>(have)) == want;
+  };
+  for (auto rest = text;;) {
+    const auto hit = std::ranges::search(rest, word, same_letter);
+    if (hit.empty()) {
+      return false;
+    }
+    const auto after = static_cast<std::size_t>(hit.end() - rest.begin());
+    if (after == rest.size()) {
+      return true;
+    }
+    const auto next = static_cast<unsigned char>(rest.at(after));
+    if (std::isalnum(next) == 0 && next != '_' && next != '$' && next != '.') {
+      return true;
+    }
+    rest = rest.substr(after);
+  }
+}
+
+// Copy the string or character literal that starts at `pos` (its quote) to `out`; it ends at its
+// closing quote or, unterminated, at the line. Returns the position after it
+auto CopyLiteral(std::string_view text, std::size_t pos, std::string& out) -> std::size_t {
+  const char quote = text.at(pos);
+  out += quote;
+  ++pos;
+  while (pos < text.size() && text.at(pos) != quote && text.at(pos) != '\n') {
+    if (text.at(pos) == '\\' && pos + 1 < text.size()) {
+      out += text.at(pos);
+      ++pos;
+    }
+    out += text.at(pos);
+    ++pos;
+  }
+  if (pos < text.size() && text.at(pos) == quote) {
+    out += quote;
+    ++pos;
+  }
+  return pos;
+}
+
+// The text without its /* */ and // comments, as the preprocessor hands it on: a comment becomes
+// one space, a // comment ends at the line, a literal is kept whole (CopyLiteral). An unterminated
+// /* hides the rest
+auto WithoutComments(std::string_view text) -> std::string {
+  std::string out;
+  out.reserve(text.size());
+  std::size_t pos = 0;
+  while (pos < text.size()) {
+    const std::string_view rest = text.substr(pos);
+    if (rest.starts_with("/*")) {
+      const std::size_t end = text.find("*/", pos + 2);
+      out += ' ';
+      pos = end == std::string_view::npos ? text.size() : end + 2;
+    } else if (rest.starts_with("//")) {
+      pos = std::min(text.find('\n', pos), text.size());
+    } else if (rest.front() == '"' || rest.front() == '\'') {
+      pos = CopyLiteral(text, pos, out);
+    } else {
+      out += rest.front();
+      ++pos;
+    }
+  }
+  return out;
+}
+}  // namespace
+
+auto MentionsIncbinVerbatim(std::string_view text) -> bool {
+  return ContainsNoCase(text, "incbin") || ContainsDirectiveNoCase(text, ".include");
+}
+
+auto MentionsIncbin(std::string_view text) -> bool { return MentionsIncbinVerbatim(WithoutComments(text)); }
+
+auto ArgsMentionIncbin(std::span<const std::string> args) -> bool {
+  return std::ranges::any_of(args, [](const std::string& arg) -> bool { return MentionsIncbinVerbatim(arg); });
+}
+
 auto RunCcMode(std::string_view argv0, std::span<const std::string> raw_args, const std::string& socket_path) -> int {
   const Stopwatch clock;
   // ghc puts the whole link behind one @rsp, -shared and -o included: classify, key and link
@@ -628,6 +724,15 @@ auto RunCcMode(std::string_view argv0, std::span<const std::string> raw_args, co
   std::optional<std::string> primary;
   if (inv.cacheable) {
     primary = PrimaryIdentity(inv);
+    // before any lookup, so an entry stored for this source is not asked for either. The depfile
+    // does not name what .incbin or .include reads (see MentionsIncbin). The words of the command
+    // line count too: a -D macro or a -Wa option can carry the directive. A .s is not
+    // preprocessed, so its comments are not dropped
+    const bool verbatim = fs::path(inv.source).extension() == ".s";
+    if (primary && !inv.link &&
+        ((verbatim ? MentionsIncbinVerbatim(*primary) : MentionsIncbin(*primary)) || ArgsMentionIncbin(user_args))) {
+      inv.cacheable = false;
+    }
   }
   if (!inv.cacheable || !primary || !cache.Connect(socket_path)) {
     return RunUncached(cache, socket_path, compiler, inv, primary.has_value(), user_args, clock);
