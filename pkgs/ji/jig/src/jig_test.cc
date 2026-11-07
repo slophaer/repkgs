@@ -166,6 +166,36 @@ void TestResponseFiles() {
   fs::remove_all(dir);
 }
 
+// .incbin pulls in a file clang's depfile does not list: such a compile is not cacheable
+void TestIncbin() {
+  assert(jig::MentionsIncbin(".section .rodata\n.incbin \"certs/x509_certificate_list\"\n"));
+  assert(jig::MentionsIncbin("asm(\".incbin \\\"kernel/config_data\\\"\");"));
+  assert(jig::MentionsIncbin("\t.INCBIN \"x\""));
+  assert(jig::MentionsIncbin(".incbin"));
+  assert(!jig::MentionsIncbin(""));
+  assert(!jig::MentionsIncbin("int main(void) { return 0; }\n.section .rodata\n.incl \"x\"\n.inc bin\n"));
+  // the assembler's .include reads a file the depfile does not name either
+  assert(jig::MentionsIncbin(".section .rodata\n.include \"data.inc\"\n"));
+  assert(jig::MentionsIncbin("asm(\".include \\\"x.inc\\\"\");"));
+  assert(jig::MentionsIncbin("\t.INCLUDE \"x\""));
+  assert(jig::MentionsIncbin("#include \"x.h\"\n  .include\t\"y\""));
+  // the C preprocessor's #include is in every file and its files are in the depfile
+  assert(!jig::MentionsIncbin("#include <stdio.h>\n#  include \"x.h\"\n# include_next <y.h>\n"));
+  assert(!jig::MentionsIncbin("#include \"x.h\"\nint include = 1;\n.inclusion\n"));
+  // a C++ member that starts with Include is not the directive (llvm/Support/SourceMgr.h)
+  assert(!jig::MentionsIncbin("return Buffers[i - 1].IncludeLoc;\nopts.includes(x); o.Include_dirs"));
+  assert(jig::MentionsIncbin(".include\"x\""));
+  assert(jig::MentionsIncbin(".include"));
+  // the command line: a -D macro or a -Wa option can carry the directive
+  assert(jig::ArgsMentionIncbin(V({"-c", "t.S", "-DEMBED=.incbin", "-o", "t.o"})));
+  assert(jig::ArgsMentionIncbin(V({"-Wa,--noexecstack,-defsym=X=1", "-DEMBED=.INCBIN"})));
+  assert(jig::ArgsMentionIncbin(V({"-Xassembler", ".include"})));
+  assert(jig::ArgsMentionIncbin(V({"-DX=asm(\".include \\\"x\\\"\")", "-c", "t.c"})));
+  assert(!jig::ArgsMentionIncbin(std::vector<std::string>{}));
+  assert(!jig::ArgsMentionIncbin(
+      V({"-O2", "-DEMBED=1", "-Wa,--noexecstack", "-Iinclude", "-include", "x.h", "-c", "t.c"})));
+}
+
 void TestParseLink() {
   Invocation inv = ParseInvocation(V({"-o", "prog", "main.o", "libutil.a", "-lz", "-shared"}));
   assert(inv.cacheable && inv.link && !inv.link_one && inv.output == "prog" && inv.source == "prog");
@@ -717,6 +747,7 @@ auto main() -> int {
   TestParsePch();
   TestParsePreprocess();
   TestParseLink();
+  TestIncbin();
   TestParseJoinedOutput();
   TestResponseFiles();
   TestDepfile();
