@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace jig {
@@ -44,6 +45,11 @@ class Store {
   [[nodiscard]] auto MaskForReplay(std::string text) const -> std::string {
     return by_content_ ? MaskHashes(std::move(text)) : text;
   }
+  // MaskForReplay undone for this build: the same text with every store path of an earlier build
+  // pointing at this build's root of that name. What a replayed depfile has to go through
+  [[nodiscard]] auto ResolveForReplay(std::string text) const -> std::string {
+    return by_content_ ? ResolveAll(std::move(text)) : text;
+  }
   // Our own output's store hash swapped for a fixed placeholder of the same width, and back. A
   // package embeds its prefix (-DOPENSSLDIR="$out/…", config.h's STARTPERL) and that hash moves
   // whenever any dependency does. Same width, so objects, .rodata and DWARF stay valid either way
@@ -55,6 +61,11 @@ class Store {
   [[nodiscard]] auto Resolve(const std::string& masked_path) const -> std::optional<std::string>;
   // every store path in a text (a cached depfile) rewritten to this build's roots
   [[nodiscard]] auto ResolveAll(std::string text) const -> std::string;
+  // Two roots of this build that mask to one name (a host and a build zlib-1.3) are ambiguous: a
+  // masked path under that name could mean either. Resolve and ResolveAll leave it masked, as for
+  // a root the build lacks, and a lookup that meets it is a miss ("ambiguous-root:<name>"). This
+  // is one such name in an already masked text, nullopt for none
+  [[nodiscard]] auto AmbiguousRoot(std::string_view masked_text) const -> std::optional<std::string>;
 
   // Identity of a file for manifest validation, nullopt if unreadable. Answers remembered via
   // RememberIdentity (from the daemon, which memoises store files across processes) come first.
@@ -75,7 +86,9 @@ class Store {
   [[nodiscard]] auto SwapOutHash(std::string bytes, bool back) const -> std::string;
   std::string out_;       // our own, still mutable, output
   std::string out_hash_;  // its 32 hash characters, "" outside a build
+  // masked root name -> this build's root, for names only one root has; the others in ambiguous_
   std::unordered_map<std::string, std::string> masked_to_real_;
+  std::unordered_set<std::string> ambiguous_;
   std::unordered_map<std::string, std::string> known_ids_;
 };
 

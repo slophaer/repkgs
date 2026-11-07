@@ -6,6 +6,7 @@
 // the ELF embeds interp, RUNPATH and native libraries as absolute store paths.
 #pragma once
 
+#include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
@@ -41,6 +42,11 @@ struct DepInfo {
   std::vector<std::string> inputs;
 };
 auto ParseDepInfo(std::string_view text) -> DepInfo;
+
+// The artifacts of one rustc run as one blob: "<name> <octal mode> <size>\n<bytes>" per file, the
+// metadata stem in the name replaced by "@". UnpackFiles restores them under `stem` into `dir`
+auto PackFiles(std::span<const std::string> paths, std::string_view stem) -> std::string;
+auto UnpackFiles(std::string_view blob, const std::filesystem::path& dir, std::string_view stem) -> bool;
 
 auto RunRustcMode(std::span<const std::string> args, const std::string& socket_path) -> int;
 

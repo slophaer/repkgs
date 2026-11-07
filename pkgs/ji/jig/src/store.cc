@@ -19,6 +19,10 @@ namespace jig {
 namespace {
 // what may follow a store root in a depfile, response file or config text
 constexpr std::string_view kPathEnds = " \t\n\\:\"';,)]}>";
+// a masked root found at text[..end) is the whole root: "*-zlib" is not the start of "*-zlib-ng"
+auto EndsRoot(std::string_view text, size_t end) -> bool {
+  return end >= text.size() || text.at(end) == '/' || kPathEnds.contains(text.at(end));
+}
 }  // namespace
 
 auto Store::Get() -> Store& {
@@ -38,8 +42,14 @@ Store::Store() : by_content_(Env("JIG_STORE_IDENTITY", "path") == "content"), ou
   roots.push_back(out_);
   for (std::string& root : roots) {
     root.resize(std::min(root.size(), root.find('/', dir_.size() + 1)));  // <store>/<hash-name>[/…]
-    if (std::string masked = MaskHashes(root); masked != root) {
-      masked_to_real_.emplace(std::move(masked), std::move(root));
+    std::string masked = MaskHashes(root);
+    if (masked == root || ambiguous_.contains(masked)) {
+      continue;
+    }
+    // one root listed twice is still one root
+    if (const auto [known, added] = masked_to_real_.try_emplace(masked, root); !added && known->second != root) {
+      masked_to_real_.erase(known);
+      ambiguous_.insert(std::move(masked));
     }
   }
 }
@@ -173,7 +183,7 @@ auto Store::ResolveAll(std::string text) const -> std::string {
     // whole root only: "*-zlib" must not eat "*-zlib-ng"
     for (size_t pos = 0; (pos = text.find(masked, pos)) != std::string::npos;) {
       const size_t end = pos + masked.size();
-      if (end < text.size() && text.at(end) != '/' && !kPathEnds.contains(text.at(end))) {
+      if (!EndsRoot(text, end)) {
         pos = end;
         continue;
       }
@@ -182,6 +192,17 @@ auto Store::ResolveAll(std::string text) const -> std::string {
     }
   }
   return text;
+}
+
+auto Store::AmbiguousRoot(std::string_view masked_text) const -> std::optional<std::string> {
+  for (const std::string& masked : ambiguous_) {
+    for (size_t pos = 0; (pos = masked_text.find(masked, pos)) != std::string_view::npos; pos += masked.size()) {
+      if (EndsRoot(masked_text, pos + masked.size())) {
+        return masked;
+      }
+    }
+  }
+  return std::nullopt;
 }
 
 auto Store::ToolId(const std::string& path) const -> std::string {

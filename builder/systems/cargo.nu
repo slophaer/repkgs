@@ -32,6 +32,10 @@ export def --env configure [vendor: any, home: string]: nothing -> nothing {
   let c = (ctx)
   load-env {CARGO_HOME: $home, CARGO_TARGET_DIR: $"($c.build)/target", RUSTC: (tool rustc)}
   mkdir $env.CARGO_HOME
+  # jig masks store hashes in a cached dep-info and resolves them through its store roots: the
+  # vendor tree must be one, or a replayed dep-info names "/nix/store/*-cargo-vendor/…", which
+  # cargo finds missing (it rebuilds every crate and reruns build scripts)
+  if $vendor != null { $env.JIG_STORE_ROOTS = $"($env.JIG_STORE_ROOTS? | default '') ($vendor)" | str trim }
   let host = (^rustc -vV | lines | parse "host: {t}" | get t.0)
   let target = $c.platform.rustTriple
   $env.CARGO_BUILD_TARGET = $target

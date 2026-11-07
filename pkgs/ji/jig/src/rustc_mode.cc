@@ -78,6 +78,12 @@ auto ParseDepInfo(std::string_view text) -> DepInfo {
 }
 
 namespace {
+// dep-info lists the files it read, among them the vendored crate sources under a store path whose
+// hash moves with Cargo.lock. Those hashes are masked in the cache and resolved on replay (as cc
+// does with its depfile). The other artifacts are binary: rlib and rmeta keep the paths they were
+// compiled with, and no rewrite could keep their offsets
+auto IsDepInfo(std::string_view name) -> bool { return name.ends_with(".d"); }
+}  // namespace
 
 // "<name> <octal mode> <size>\n<bytes>" per file. The metadata stem is replaced by "@"
 auto PackFiles(std::span<const std::string> paths, std::string_view stem) -> std::string {
@@ -89,8 +95,10 @@ auto PackFiles(std::span<const std::string> paths, std::string_view stem) -> std
     }
     std::error_code ignored;
     const unsigned mode = static_cast<unsigned>(fs::status(path, ignored).permissions()) & kPermissionBits;
-    blob += std::format("{} {:o} {}\n", ReplaceAll(fs::path(path).filename().string(), stem, "@"), mode, data->size());
-    blob += *data;
+    const std::string name = fs::path(path).filename().string();
+    const std::string bytes = IsDepInfo(name) ? Store::Get().MaskForReplay(*data) : *data;
+    blob += std::format("{} {:o} {}\n", ReplaceAll(name, stem, "@"), mode, bytes.size());
+    blob += bytes;
   }
   return blob;
 }
@@ -112,7 +120,15 @@ auto UnpackFiles(std::string_view blob, const fs::path& dir, std::string_view st
       return false;
     }
     const fs::path out = dir / ReplaceAll(head.at(0), "@", stem);
-    if (!WriteFile(out, blob.substr(newline + 1, *size))) {
+    const std::string_view bytes = blob.substr(newline + 1, *size);
+    const Store& store = Store::Get();
+    const std::string text = IsDepInfo(head.at(0)) ? store.ResolveForReplay(std::string(bytes)) : std::string(bytes);
+    // a store root this build lacks stays masked: cargo would find "/nix/store/*-…" missing,
+    // rebuild the crate and rerun its build script. Compile instead
+    if (IsDepInfo(head.at(0)) && text.contains(store.dir() + "/*-")) {
+      return false;
+    }
+    if (!WriteFile(out, text)) {
       return false;
     }
     std::error_code ignored;
@@ -121,6 +137,8 @@ auto UnpackFiles(std::string_view blob, const fs::path& dir, std::string_view st
   }
   return true;
 }
+
+namespace {
 
 // The named long options whose value matters to us. True if `arg` was one (idx advanced past a
 // separate value token).
@@ -297,7 +315,7 @@ auto RunRustcMode(std::span<const std::string> args, const std::string& socket_p
   const Store& store = Store::Get();
   Hasher hasher;
   // bumped when what a key covers changes, so entries made under the old rules are not asked for
-  hasher.Field("rs-schema=7");
+  hasher.Field("rs-schema=8");
   // cargo may hand us a bare `rustc`: resolve on PATH first, or two toolchains share a key
   hasher.Field("rustc=" + store.ToolId(OnPath(rustc)));
   hasher.Field("stdlib=" + StdlibIds(cache, rustc, inv.sysroot));
@@ -319,10 +337,14 @@ auto RunRustcMode(std::span<const std::string> args, const std::string& socket_p
 
   // the log's subject says how far a miss got
   const std::expected<ResultKey, std::string> result_key = FindResult(cache, request_key);
-  const std::string missed = label + " " + (result_key ? "object-gone" : result_key.error());
+  std::string missed = label + " " + (result_key ? "object-gone" : result_key.error());
   if (result_key) {
     const std::optional<std::string> blob = cache.Get(slot::Object(*result_key));
-    if (blob && UnpackFiles(*blob, inv.out_dir, inv.extra_filename)) {
+    // the crate root is not in the manifest: its dep-info may name two roots of one name.
+    // UnpackFiles refuses that too; this says why
+    if (const auto root = blob ? store.AmbiguousRoot(*blob) : std::nullopt) {
+      missed = label + " ambiguous-root:" + *root;
+    } else if (blob && UnpackFiles(*blob, inv.out_dir, inv.extra_filename)) {
       std::print(stderr, "{}", cache.Get(slot::Stderr(*result_key)).value_or(""));
       LogOutcome("rustc", Outcome::kHit, label, clock);
       return 0;

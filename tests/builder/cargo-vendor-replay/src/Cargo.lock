@@ -1,0 +1,14 @@
+version = 4
+
+[[package]]
+name = "dep"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "test-cargo-vendor-replay"
+version = "1.0.0"
+dependencies = [
+ "dep",
+]
