@@ -212,16 +212,22 @@ auto Lookup(CacheClient& cache, const RequestKey& request_key, const Invocation&
   if (!inv.link_one && !inv.link && status.has_value()) {
     result.status = static_cast<int>(ParseUint(*status).value_or(1));
   }
+  const Store& store = Store::Get();
   if (result.status == 0) {
-    // depfile options are not in the key, so an entry stored by a run without -MD lacks one
-    if (!object || (inv.wants_depfile && !depfile)) {
+    if (!object) {
       return std::unexpected("object-gone");
     }
-    const Store& store = Store::Get();
     result.object = store.UnmaskOut(std::move(*object));
-    result.depfile = inv.wants_depfile ? std::optional(store.UnmaskOut(std::move(*depfile))) : std::nullopt;
   }
-  result.stderr_text = Store::Get().UnmaskOut(std::move(stderr_text).value_or(""));
+  // depfile options are not in the key, so an entry stored by a run without -MD lacks one. A
+  // failure needs it too: the compiler writes it before the error (kbuild's fixdep reads it)
+  if (inv.wants_depfile) {
+    if (!depfile) {
+      return std::unexpected("object-gone");
+    }
+    result.depfile = store.UnmaskOut(std::move(*depfile));
+  }
+  result.stderr_text = store.UnmaskOut(std::move(stderr_text).value_or(""));
   return result;
 }
 
@@ -368,6 +374,9 @@ auto CompileAndStore(CacheClient& cache, const std::string& compiler, const Requ
     cache.Put(slot::Manifest(request_key), manifest.text);
     cache.Put(slot::ExitStatus(manifest.result_key), std::to_string(run.status));
     cache.Put(slot::Stderr(manifest.result_key), store.MaskOut(run.stderr_text));
+    if (inv.wants_depfile) {
+      cache.Put(slot::Depfile(manifest.result_key), store.MaskOut(store.MaskForReplay(*dep_text)));
+    }
     LogOutcome("cc", Outcome::kMissStoredFail, subject, clock);
     return run.status;
   }
