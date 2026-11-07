@@ -146,7 +146,12 @@ auto ValidateManifest(CacheClient& cache, const RequestKey& request_key, std::st
   std::vector<std::string> paths;
   paths.reserve(entries.size());
   for (const Entry& entry : entries) {
-    if (entry.tab != std::string::npos) {
+    // the entry's path could be either of two roots of this build: a miss, whatever it holds
+    const bool absent = entry.tab == std::string::npos;
+    if (const auto root = store.AmbiguousRoot(std::string_view(entry.line).substr(absent ? 1 : 0, entry.tab))) {
+      return std::unexpected("ambiguous-root:" + *root);
+    }
+    if (!absent) {
       paths.push_back(entry.path);
     }
   }

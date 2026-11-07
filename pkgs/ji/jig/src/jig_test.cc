@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <initializer_list>
+#include <optional>
 #include <print>
 #include <string>
 #include <string_view>
@@ -44,6 +45,9 @@ auto V(std::initializer_list<const char*> items) -> std::vector<std::string> { r
   JIG_STORE_DIR "/9123456789abcdfghijklmnpqrsvwxyz-openssl"  // NOLINT(cppcoreguidelines-macro-usage): setenv
                                                              // before statics
 constexpr std::string_view kVendor = VENDOR_ROOT;
+// two roots of one name (a host and a build zlib in a cross build): masked, they are one
+#define ZLIB_A JIG_STORE_DIR "/1111111111111111111111111111111z-zlib-1.3"  // NOLINT(cppcoreguidelines-macro-usage)
+#define ZLIB_B JIG_STORE_DIR "/2222222222222222222222222222222z-zlib-1.3"  // NOLINT(cppcoreguidelines-macro-usage)
 
 void TestBase() {
   assert(jig::SplitWhitespace("  a  b\tc\n") == V({"a", "b", "c"}));
@@ -129,6 +133,36 @@ void TestStoreResolve() {
   const std::string other = dir + "/" + std::string(jig::kStoreHashLength, 'a') + vendor.substr(vendor.find('-'));
   assert(store.ResolveAll("p=\"" + other + "/x\" q=" + other + "-ng/y") ==
          "p=\"" + vendor + "/x\" q=" + store.MaskHashes(other) + "-ng/y");
+}
+
+// Two roots of the build mask to one name: a masked path under it could be either. Resolving to
+// the first would replay the wrong one, so it resolves to none, and whatever names it is a miss.
+// The vendor root listed twice is one root, not two
+void TestStoreAmbiguousRoot() {
+  const jig::Store& store = jig::Store::Get();
+  const std::string dir = store.dir();
+  const std::string twin = dir + "/*-zlib-1.3";
+  const std::string first = ZLIB_A;
+  assert(!store.Resolve(twin + "/include/zlib.h"));
+  assert(store.ResolveAll(first + "/include/zlib.h") == twin + "/include/zlib.h");
+  assert(store.AmbiguousRoot("a.o: " + twin + "/include/zlib.h b.h") == twin);
+  assert(store.AmbiguousRoot("a.o: " + twin + "-ng/include/zlib.h") == std::nullopt);
+  assert(store.AmbiguousRoot(store.MaskHashes(std::string(kVendor)) + "/x") == std::nullopt);
+  assert(store.Resolve(store.MaskHashes(std::string(kVendor))) == std::string(kVendor));
+
+  // a manifest input under the twins: a miss that says why
+  const jig::RequestKey key(jig::Tool::kCc, jig::HashOf("twin"));
+  jig::CacheClient offline;
+  assert(jig::ValidateManifest(offline, key, twin + "/include/zlib.h\tC:00\n").error_or("") ==
+         "ambiguous-root:" + twin);
+
+  // a rustc dep-info naming the twins (a crate root under them, not in the manifest): no replay
+  const fs::path tmp = fs::temp_directory_path() / ("jig-twin-" + std::to_string(::getpid()));
+  fs::create_directories(tmp);
+  assert(WriteFile(tmp / "z-aaaa.d", "deps/z-aaaa.d: " + first + "/src/lib.rs\n"));
+  const std::vector<std::string> paths{(tmp / "z-aaaa.d").string()};
+  assert(!jig::UnpackFiles(jig::PackFiles(paths, "-aaaa"), tmp, "-bbbb"));
+  fs::remove_all(tmp);
 }
 
 // two packages whose bin/rustc link to one launcher: distinct ids, the launcher not in them
@@ -421,6 +455,38 @@ void TestDepInfo() {
   assert(info.inputs == V({(cwd + "/src/lib.rs").c_str(), (cwd + "/src/m.rs").c_str()}));
 }
 
+// A cached dep-info names the store paths of the build that made it (a vendored crate's source).
+// A hit in another build (another Cargo.lock, so another cargo-vendor store path) must write this
+// build's: cargo reads the files a dep-info lists, and a missing one rebuilds the crate. The rlib
+// is not text, it comes back as it was
+void TestRustcDepfileReplay() {
+  const jig::Store& store = jig::Store::Get();
+  const std::string other = store.dir() + "/" + std::string(jig::kStoreHashLength, 'a') +
+                            std::string(kVendor).substr(std::string(kVendor).find('-'));
+  const fs::path tmp = fs::temp_directory_path() / ("jig-rustc-replay-" + std::to_string(::getpid()));
+  const fs::path from = tmp / "from";
+  const fs::path into = tmp / "into";
+  fs::create_directories(from);
+  fs::create_directories(into);
+  const std::string rule = other + "/dep-1.0.0/src/lib.rs";
+  const std::string depinfo = "deps/dep-aaaa.d: " + rule + "\n\n" + rule + ":\n# env-dep:X\n";
+  const std::string rlib = "rlib naming " + rule + "\n";
+  assert(WriteFile(from / "dep-aaaa.d", depinfo) && WriteFile(from / "libdep-aaaa.rlib", rlib));
+  const std::vector<std::string> paths{(from / "dep-aaaa.d").string(), (from / "libdep-aaaa.rlib").string()};
+  const std::string blob = jig::PackFiles(paths, "-aaaa");
+  assert(jig::UnpackFiles(blob, into, "-bbbb"));
+  const std::string vendored = std::string(kVendor) + "/dep-1.0.0/src/lib.rs";
+  assert(jig::ReadFile(into / "dep-bbbb.d") == "deps/dep-aaaa.d: " + vendored + "\n\n" + vendored + ":\n# env-dep:X\n");
+  assert(jig::ReadFile(into / "libdep-bbbb.rlib") == rlib);
+  // a root this build does not have (a vendor tree missing from $JIG_STORE_ROOTS) stays masked:
+  // cargo would find "/nix/store/*-…" missing, rebuild and rerun build scripts. Not a hit
+  const std::string stranger = store.dir() + "/" + std::string(jig::kStoreHashLength, 'c') + "-not-a-root";
+  const std::string lost = "deps/dep-aaaa.d: " + stranger + "/src/lib.rs\n";
+  assert(WriteFile(from / "dep-aaaa.d", lost));
+  assert(!jig::UnpackFiles(jig::PackFiles(paths, "-aaaa"), into, "-cccc"));
+  fs::remove_all(tmp);
+}
+
 void TestRustInvocation() {
   jig::RustInvocation inv = jig::ParseRustInvocation(V({
       "--crate-name",
@@ -680,12 +746,14 @@ void TestPassthroughCacheKey() {
 // NOLINTNEXTLINE(bugprone-exception-escape): a throwing test is a failing test
 auto main() -> int {
   setenv("JIG_STORE_IDENTITY", "content", 1);  // NOLINT(concurrency-mt-unsafe): before any Store::Get
-  setenv("JIG_STORE_ROOTS", VENDOR_ROOT, 1);   // NOLINT(concurrency-mt-unsafe)
-  setenv("out", OUT_ROOT, 1);                  // NOLINT(concurrency-mt-unsafe)
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  setenv("JIG_STORE_ROOTS", VENDOR_ROOT " " ZLIB_A " " ZLIB_B " " VENDOR_ROOT, 1);
+  setenv("out", OUT_ROOT, 1);  // NOLINT(concurrency-mt-unsafe)
   TestBase();
   TestStoreMask();
   TestStoreKey();
   TestStoreResolve();
+  TestStoreAmbiguousRoot();
   TestStoreToolId();
   TestParseInvocation();
   TestParsePch();
@@ -699,6 +767,7 @@ auto main() -> int {
   TestDriverPackageFlags();
   TestDriverLink();
   TestDepInfo();
+  TestRustcDepfileReplay();
   TestRustInvocation();
   TestGoCache();
   TestBinaryImage();

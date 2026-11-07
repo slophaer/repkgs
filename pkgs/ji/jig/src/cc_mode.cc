@@ -226,6 +226,10 @@ auto Lookup(CacheClient& cache, const RequestKey& request_key, const Invocation&
       return std::unexpected("object-gone");
     }
     result.depfile = store.UnmaskOut(std::move(*depfile));
+    // a path the manifest does not hold (the source itself) under two roots of one name
+    if (const auto root = store.AmbiguousRoot(*result.depfile)) {
+      return std::unexpected("ambiguous-root:" + *root);
+    }
   }
   result.stderr_text = store.UnmaskOut(std::move(stderr_text).value_or(""));
   return result;
