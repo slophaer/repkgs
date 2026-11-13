@@ -27,6 +27,10 @@
 #else
 #include <stdlib.h>  // NOLINT(modernize-deprecated-headers): setenv/unsetenv are POSIX, not <cstdlib>
 #include <unistd.h>
+#ifdef __linux__
+#include <elf.h>  // AT_EXECFN
+#include <sys/auxv.h>
+#endif
 #endif
 
 #include <algorithm>  // NOLINT(misc-include-cleaner): std::min in the _WIN32 half
@@ -34,6 +38,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -264,23 +269,55 @@ auto Argv0Path(std::string_view argv0) -> fs::path {
 
 constexpr int kMaxHops = 32;
 
-// The per-program symlink <pkg>/bin/foo: follow argv[0]'s symlink chain hop by hop (profiles,
-// result links) and stop at the hop whose *target* is named "launch". Its directory is
-// canonicalized, its basename kept: that name selects the record.
-auto InvokedPath(std::string_view argv0) -> fs::path {
-  fs::path cur = Argv0Path(argv0);
+// The per-program symlink <pkg>/bin/foo: follow a symlink chain hop by hop (profiles, result
+// links) and stop at the hop whose *target* is named "launch". Its directory is canonicalized, its
+// basename kept: that name selects the record. Why not, when the chain ends elsewhere
+auto LauncherOf(fs::path cur) -> std::expected<fs::path, std::string> {
   for (int hop = 0; hop < kMaxHops; ++hop) {
     std::error_code err;
     const fs::path target = fs::read_symlink(cur, err);
     if (err) {
-      Die("not a launcher symlink", cur.native());
+      return std::unexpected("not a launcher symlink: " + cur.string());
     }
     if (target.filename() == "launch") {
       return Canonical(cur.parent_path()) / cur.filename();
     }
     cur = target.is_absolute() ? target : cur.parent_path() / target;
   }
-  Die("symlink loop", argv0);
+  return std::unexpected("symlink loop: " + cur.string());
+}
+
+// The path execve was given (AT_EXECFN), as it was given: the launcher symlink itself, where
+// /proc/self/exe would be launch with every link resolved
+auto ExecFn() -> std::optional<fs::path> {
+#ifdef __linux__
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr): auxv holds its address
+  const auto* name = reinterpret_cast<const char*>(getauxval(AT_EXECFN));
+  if (name != nullptr && *name != '\0') {
+    std::error_code err;
+    return fs::absolute(name, err);
+  }
+#endif
+  return std::nullopt;
+}
+
+// argv[0] with a '/' names the launcher (a shebang's interpreter is such a path, and AT_EXECFN is
+// then the script). A bare name is what a shell looked up on PATH, or what a program chose: gnupg
+// execs gpg-agent by its full path with argv[0] "gpg-agent". The kernel knows which file ran, so
+// that comes first, and PATH only when it leads to no launcher
+auto InvokedPath(std::string_view argv0) -> fs::path {
+  if (!argv0.contains('/')) {
+    if (const auto execfn = ExecFn()) {
+      if (auto self = LauncherOf(*execfn)) {
+        return *self;
+      }
+    }
+  }
+  const auto self = LauncherOf(Argv0Path(argv0));
+  if (!self) {
+    Die(self.error());
+  }
+  return *self;
 }
 
 [[noreturn]] void Run(const fs::path& program, std::string& argv0, std::vector<std::string>& pre,
