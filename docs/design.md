@@ -73,6 +73,21 @@ A list of trees is merged first, so ten layers cost what one does, and a later t
 also takes back what an earlier one appended. Every path is checked (unknown package, `remove`
 of a missing field, `append` on a non-list, a dependency naming nothing) and the result is
 validated like a written spec. There is no `.override`, overlay or module system besides this.
+
+The same trees apply to a set already made (`s = import ./nix/set.nix { … }`), for a caller that
+knows a package's settings only after it has the set (a kernel config from options that are
+checked against the set):
+
+```nix
+s.variant "linux" { env.merge = { CONFIG = "…"; }; }   # this one package, the set unchanged
+s.extend { overrides.zlib.env.merge = { X = "1"; }; } # the set again, these after its own
+```
+
+`variant` makes one package again from its package.nix with the tree after the set's overrides;
+the other packages, its dependents too, keep the original, so it is for what nothing in the set
+links. `extend` takes `overrides`, `packages` and `features` and is the import with both
+argument lists: the dependents of a changed package change, every other derivation stays the
+same and is not rebuilt.
 In-tree variants use the same verbs: `llvm22` is `variant pkgs.llvm { }` with its own
 `sources.toml`.
 

@@ -1,5 +1,5 @@
 # The package set for one platform and what it is made from:
-# { pkgs, platform, buildPkgs, bootstrap, buildSystems }.
+# { pkgs, platform, buildPkgs, bootstrap, buildSystems, toolchain, variant, extend, sbom, bundle }.
 # default.nix is `pkgs` alone; nix/checks.nix reads the rest.
 {
   system ? builtins.currentSystem,
@@ -93,24 +93,33 @@ let
     ];
   };
 
-  package = import ./package.nix {
-    platform = plat;
-    nu = bootstrap.seed;
-    inherit lib;
-    # `prebuilt = true` patches upstream ELFs with it (builder/implant.nu)
-    relocTools = [ buildPkgs.formatelf ];
-    inherit
-      toolchain
-      libcOut
-      launch
-      dlaudit
-      buildSystems
-      baseTools
-      ;
-    # identity when there are none, so the common case allocates nothing per package
-    edit = if overrideTree == { } then null else ov.apply self overrideTree;
-    # [pin] sys names resolve here
-    pkgs = self;
+  # the `package` function under an override tree (the set's, or a variant's on top of it)
+  packageFor =
+    tree:
+    import ./package.nix {
+      platform = plat;
+      nu = bootstrap.seed;
+      inherit lib;
+      # `prebuilt = true` patches upstream ELFs with it (builder/implant.nu)
+      relocTools = [ buildPkgs.formatelf ];
+      inherit
+        toolchain
+        libcOut
+        launch
+        dlaudit
+        buildSystems
+        baseTools
+        ;
+      # identity when there are none, so the common case allocates nothing per package
+      edit = if tree == { } then null else ov.apply self tree;
+      # [pin] sys names resolve here
+      pkgs = self;
+    };
+  package = packageFor overrideTree;
+  # what callWith edits specs with: the set's own overrides
+  setOverrides = {
+    tree = overrideTree;
+    inherit package;
   };
 
   fetch = import ./fetch.nix {
@@ -148,22 +157,25 @@ let
     unpacker = bootstrap.seed;
     inherit system;
   };
-  callPackage =
-    dir: name:
+  # `over`: the override tree and the `package` function made with it (setOverrides, or a
+  # set-level variant's)
+  callPackageWith =
+    over: dir: name:
     let
       st = dir + "/sources.toml";
       sources = if builtins.pathExists st then readSources st else null;
     in
-    callWith (import (dir + "/package.nix")) dir name sources null;
+    callWith over (import (dir + "/package.nix")) dir name sources null;
+  callPackage = callPackageWith setOverrides;
   # one package.nix evaluated under `name`: `fn` its function, `edit0` what `variant` adds on
   # top of the spec (identity for the package itself). `variant pkgs.llvm { … }` re-enters here
   # with llvm's function, so the base body sees this name's sources and features
   callWith =
-    fn: dir: name: sources: edit0:
+    over: fn: dir: name: sources: edit0:
     let
       formals = builtins.functionArgs fn;
       edit = if edit0 == null then (a: a) else edit0;
-      local = overrideTree.${name}.features or { };
+      local = over.tree.${name}.features or { };
       # default <- set-wide <- overrides.<name>.features, for a package.nix that takes `features`.
       # Its declaration is read by one more call whose `package` just returns it: lazy (no spec
       # is built), and the real call's dependencies may then depend on feature values. One that
@@ -194,15 +206,15 @@ let
             features = resolved;
             package =
               if edit0 == null then
-                package sources dir resolved fn
+                over.package sources dir resolved fn
               else
-                args: package sources dir resolved fn (edit0 args);
+                args: over.package sources dir resolved fn (edit0 args);
             # another package's spec under this name, edited with override verbs: this function
             # again with the base's package.nix. Own sources.toml when the directory has one
             # (llvm22: another pin), else the base's (rust-std: same tarball). A list of trees merges
             variant =
               base: tree:
-              callWith base.fn base.dir name (if sources == null then base.sources else sources) (
+              callWith over base.fn base.dir name (if sources == null then base.sources else sources) (
                 args: ov.applyOne self name (ov.merge tree) (edit args // { inherit name; })
               );
           }
@@ -213,7 +225,8 @@ let
 
   # pkgs/<first two letters>/<name>/package.nix, attribute name == directory name
   unknownOverrides = ov.unknown (self // aliases) overrideTree;
-  self =
+  # name -> the directory its package.nix is in: the tree, then the out-of-tree packages
+  dirs =
     builtins.listToAttrs (
       builtins.concatMap (
         shard:
@@ -223,7 +236,7 @@ let
         map
           (n: {
             name = n;
-            value = callPackage (dir + "/${n}") n;
+            value = dir + "/${n}";
           })
           (
             builtins.filter (n: builtins.pathExists (dir + "/${n}/package.nix")) (
@@ -232,8 +245,61 @@ let
           )
       ) (builtins.attrNames (removeAttrs (builtins.readDir ../pkgs) [ "aliases.toml" ]))
     )
-    // builtins.mapAttrs (n: dir: callPackage dir n) packages
-    // aliases;
+    // packages;
+  self = builtins.mapAttrs (n: dir: callPackage dir n) dirs // aliases;
+
+  # pkgs.<name> made again from its package.nix, with `tree` (what `overrides.<name>` takes,
+  # `features` too) applied after the set's own overrides. Only this derivation changes: the set
+  # and its packages, those that depend on <name> included, keep the original. An alias names
+  # its target. For a package nothing else in the set links (a kernel, a data bundle)
+  variant =
+    name: tree:
+    let
+      real = aliasTargets.${name} or name;
+      merged =
+        if overrideTree ? ${real} then
+          ov.merge [
+            overrideTree.${real}
+            tree
+          ]
+        else
+          tree;
+      trees = overrideTree // {
+        ${real} = merged;
+      };
+    in
+    if !(dirs ? ${real}) then
+      throw "variant: no package named ${name}"
+    else
+      callPackageWith {
+        tree = trees;
+        package = packageFor trees;
+      } dirs.${real} real;
+
+  # this set imported again with more arguments: `overrides` after this set's, `packages` and
+  # `features` merged over its own. Every package sees the change, so what depends on a changed
+  # package gets a new derivation and the rest keeps its own; evaluation is a fresh import's
+  extend =
+    more:
+    let
+      bad = builtins.attrNames (
+        removeAttrs more [
+          "overrides"
+          "packages"
+          "features"
+        ]
+      );
+      asList = t: if builtins.isList t then t else [ t ];
+    in
+    if bad != [ ] then
+      throw "extend: ${toString bad}: takes overrides, packages and features; another platform or seed is another import"
+    else
+      import ./set.nix {
+        inherit system platform seed;
+        overrides = asList overrides ++ asList (more.overrides or [ ]);
+        packages = packages // more.packages or { };
+        features = features // more.features or { };
+      };
   # unversioned names for the default line of multi-version packages (pkgs/aliases.toml)
   aliasTargets = builtins.fromTOML (builtins.readFile ../pkgs/aliases.toml);
   # aliases go on top of every package, so an out-of-tree one with an alias's name would be dropped
@@ -261,6 +327,7 @@ in
   );
   # the elaborated platform record every package receives
   platform = plat;
+  inherit variant extend;
   inherit bootstrap buildSystems toolchain;
   # the build host's set: `pkgs` itself when not cross, the host-platform set when cross
   inherit buildPkgs;
