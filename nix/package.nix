@@ -62,6 +62,7 @@ let
     "uses"
     "phases"
     "buildDependencies"
+    "buildLibraries"
     "dependencies"
     "sys"
     "sysTools"
@@ -253,6 +254,9 @@ let
     )
     ++ map (d: "buildDependencies: ${d.pname} is built for ${d.platform}") (
       filter (d: (d.platform or platform.system) != platform.system) (args.buildDependencies or [ ])
+    )
+    ++ map (d: "buildLibraries: ${d.pname} is built for ${d.platform}") (
+      filter (d: (d.platform or platform.system) != platform.system) (args.buildLibraries or [ ])
     );
   # `supported` without forcing the derivation (docs/design.md): platforms.{cpu,os,abi,libc,posix,cross},
   # a per-cpu tarball in sources.toml, and the dependencies' own verdicts
@@ -275,6 +279,7 @@ let
   unsupportedDeps = filter (d: !(d.supported or true)) (
     common.dependencies
     ++ (args.buildDependencies or [ ])
+    ++ (args.buildLibraries or [ ])
     ++ concatMap (u: buildSystems.${u}.tools spec) uses
   );
   unsupportedReason =
@@ -548,6 +553,7 @@ let
       "source"
       "patches"
       "buildDependencies"
+      "buildLibraries"
       "dependencies"
       "bootstrapTools"
     ]
@@ -590,6 +596,9 @@ let
       tests = if separate then [ ] else testDeps;
       base = if args.bootstrapTools or false then baseTools.bootstrap else baseTools.full;
     };
+    # libraries the build machine's compiler links (builder/env.nu): not on PATH, not linked
+    # into the package by the target compiler when cross
+    buildLibraries = args.buildLibraries or [ ];
     # [pin] sys: libraries the lock files can link (builder/sys-libs.nu). Those the set lacks
     # here are left to the locked package (vendored copy or feature off)
     dependencies =

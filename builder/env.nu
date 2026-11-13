@@ -24,11 +24,15 @@ def reproducible [a: record]: nothing -> record {
 }
 
 # every store dir this build reads from: the dependency closure (lock trees included), build
-# tools, and what the toolchain lists in its etc/roots (sysroot, seed headers). jig maps masked
-# manifest paths back to files through exactly this list
-def store-roots [a: record, deps: list<record>]: nothing -> list<string> {
-  ($deps | get root) ++ $a.buildDependencies ++ (which cc | each {|c| open --raw ($c.path | path dirname -n 2 | path join etc/roots) | split row " " } | flatten | compact -e) | uniq
+# tools and libraries, and what the toolchain lists in its etc/roots (sysroot, seed headers). jig
+# maps masked manifest paths back to files through exactly this list
+def store-roots [a: record, deps: list<record>, blibs: list<record>]: nothing -> list<string> {
+  ($deps | get root) ++ $a.buildDependencies ++ ($blibs | get root) ++ (which cc | each {|c| open --raw ($c.path | path dirname -n 2 | path join etc/roots) | split row " " } | flatten | compact -e) | uniq
 }
+
+# spec buildLibraries: libraries the build machine's compiler links (kernel HOSTCC tools, code
+# generators), with what they propagate. They reach that compiler and PKG_CONFIG_FOR_BUILD only
+export def build-libraries [a: record]: nothing -> list<record> { dep-closure ($a.buildLibraries? | default []) }
 
 # a compiler's toolchain root, the key of its $PKGS_CC entry: jig reads etc/jig.json beside the
 # real path of its executable
@@ -53,30 +57,33 @@ def bindgen-args [deps: list<record>]: nothing -> string {
 # how compilers and build systems find the dependencies, and what jig needs for its cache keys:
 # content identity (a rebuilt but identical dependency still hits), the store roots masked
 # header names map back to, and a prefix map so no build or store path lands in DWARF/__FILE__
-def toolchain [a: record, deps: list<record>]: nothing -> record {
+def toolchain [a: record, deps: list<record>, blibs: list<record>]: nothing -> record {
   let mask = {|p: string, under: string| $"($p)=/($under)/($p | path basename | str substring 33..)" }
   # aclocal macros from build tools (automake, libtool, pkgconf) and runtime deps
   let build_aclocal = ($a.buildDependencies | each {|p| (exports-of $p).aclocalDirs | each {|d| $"($p)/($d)"} } | flatten)
   let deps_aclocal = (dep-dirs $deps aclocalDirs)
+  # natively one pkg-config serves both machines: build libraries after the dependencies.
+  # Cross, PKG_CONFIG_FOR_BUILD has its own (prepare.nu)
+  let build_pc = (if $a.platform.cross { [] } else { dep-dirs $blibs pkgconfigDirs })
   let site = (build-site-packages $a)
   {
     CC: cc, CXX: c++, AR: llvm-ar, RANLIB: llvm-ranlib, NM: llvm-nm, STRIP: llvm-strip
-    PKG_CONFIG_PATH: (dep-dirs $deps pkgconfigDirs | str join ":")
+    PKG_CONFIG_PATH: (dep-dirs $deps pkgconfigDirs | append $build_pc | str join ":")
     CMAKE_PREFIX_PATH: ($deps | get root | str join ";")
     ACLOCAL_PATH: ($build_aclocal ++ $deps_aclocal | str join ":")
     JIG_LOG: $"($env.NIX_BUILD_TOP)/jig.log"
     JIG_LOG_ARGS: $"($env.NIX_BUILD_TOP)/jig-uncached.log"
     JIG_STORE_IDENTITY: content
-    JIG_STORE_ROOTS: (store-roots $a $deps | str join " ")
-    PKGS_PREFIX_MAP: ([$"($env.NIX_BUILD_TOP)=/build"] ++ ($deps | get root | each { do $mask $in deps }) ++ ($a.buildDependencies | each { do $mask $in tools }) | str join ":")
+    JIG_STORE_ROOTS: (store-roots $a $deps $blibs | str join " ")
+    PKGS_PREFIX_MAP: ([$"($env.NIX_BUILD_TOP)=/build"] ++ ($deps | get root | each { do $mask $in deps }) ++ ($a.buildDependencies ++ ($blibs | get root) | uniq | each { do $mask $in tools }) | str join ":")
     BINDGEN_EXTRA_CLANG_ARGS: (bindgen-args $deps)
   } | merge (if ($site | is-empty) { {} } else { {PYTHONPATH: ($site | str join ":")} })
 }
 
 # $PKGS_CC: what jig adds to every target cc command line (dependency dirs, defaults, hardening,
-# the package's cc.*flags), keyed by toolchain root so cc-build gets none of it. Not CFLAGS:
-# a Makefile that sets CFLAGS must not lose them
-def package-cc [a: record, deps: list<record>]: nothing -> record {
+# the package's cc.*flags), keyed by toolchain root so cc-build gets none of it, only the build
+# libraries' dirs. Not CFLAGS: a Makefile that sets CFLAGS must not lose them
+def package-cc [a: record, deps: list<record>, blibs: list<record>]: nothing -> record {
   let cc = ($a.spec.cc? | default {})
   let h = (hardening enabled-flags $a.platform $cc)
   # spec.debug for cc and for cargo's release profile
@@ -88,7 +95,17 @@ def package-cc [a: record, deps: list<record>]: nothing -> record {
     cxxflags: ($h.cxxflags ++ ($cc.cxxflags? | default []))
     ldflags: ((dep-dirs $deps libDirs | each { $"-L($in)" }) ++ $h.ldflags ++ ($cc.ldflags? | default []))
   }
-  {PKGS_CC: ({(cc-root cc): $flags} | to json -r), CARGO_PROFILE_RELEASE_DEBUG: $g.1, CARGO_PROFILE_RELEASE_STRIP: none}
+  # build libraries as the dependencies are: -isystem and trailing -L, and jig gives a linked one's
+  # dir to RUNPATH, so the program runs during the build
+  let build = {cflags: (dep-dirs $blibs includeDirs | each { $"-isystem($in)" }), cxxflags: [], ldflags: (dep-dirs $blibs libDirs | each { $"-L($in)" })}
+  let entries = (if ($blibs | is-empty) { {(cc-root cc): $flags} } else if $a.platform.cross {
+    if (which cc-build | is-empty) { error make {msg: "buildLibraries: the toolchain has no cc-build for the build machine"} }
+    {(cc-root cc): $flags, (cc-root cc-build): $build}
+  } else {
+    # natively cc is the build machine's compiler too: build libraries after the dependencies
+    {(cc-root cc): ($flags | update cflags { $in ++ $build.cflags } | update ldflags { $in ++ $build.ldflags })}
+  })
+  {PKGS_CC: ($entries | to json -r), CARGO_PROFILE_RELEASE_DEBUG: $g.1, CARGO_PROFILE_RELEASE_STRIP: none}
 }
 
 # rustc and go go through jig only when the environment says so, and more than their own build
@@ -102,10 +119,11 @@ export def compiler-caches []: nothing -> record {
 }
 
 export def --env main [a: record, deps: list<record>, out: string]: nothing -> nothing {
+  let blibs = (build-libraries $a)
   load-env (sandbox-dirs $a $out)
   load-env (reproducible $a)
-  load-env (toolchain $a $deps)
-  load-env (package-cc $a $deps)
+  load-env (toolchain $a $deps $blibs)
+  load-env (package-cc $a $deps $blibs)
   # exported env is for what runs during the build: from build tools, not target dependencies
   load-env ($a.buildDependencies | each { (exports-of $in).env } | reduce -f {} {|it, acc| $acc | merge $it })
   load-env ($a.spec.env? | default {})

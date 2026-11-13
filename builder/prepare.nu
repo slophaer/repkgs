@@ -6,7 +6,7 @@ use env.nu
 
 # cross: does the builder's binfmt_misc run target binaries transparently (probe = target ld.so)?
 # If not, build systems that support one get the explicit emulator
-def --env resolve-platform [p: record]: nothing -> record {
+def --env resolve-platform [p: record, build_pc: list<string>]: nothing -> record {
   let transparent = ($p.cross and (try { (^$p.probe --version | complete).exit_code == 0 } catch { false }))
   if $p.cross { note platform $"($p.name) binfmt=($transparent)" }
   let plat = ($p | update emulator (if $transparent { [] } else { $p.emulator }) | insert transparent $transparent)
@@ -15,19 +15,20 @@ def --env resolve-platform [p: record]: nothing -> record {
   # return addresses stop authenticating. binfmt-registered qemu reads it too
   let qemu = (if $p.cross { {QEMU_RESERVED_VA: "0x1000000000000"} } else { {} })
   let wine = (if $p.os == "windows" { {WINEPREFIX: $"($env.NIX_BUILD_TOP)/wine", WINEDEBUG: "-all,err+module", WINEDLLOVERRIDES: "mscoree,mshtml="} } else { {} })
-  load-env ((build-machine-tools $plat) | merge {PKGS_EMULATOR: ($plat.emulator | str join " ")} | merge $qemu | merge $wine)
+  load-env ((build-machine-tools $plat $build_pc) | merge {PKGS_EMULATOR: ($plat.emulator | str join " ")} | merge $qemu | merge $wine)
   $plat
 }
 
 # The *_FOR_BUILD convention (AX_PROG_CC_FOR_BUILD, glib, meson's native file reads the same
 # names through meson.nu): build-machine compiler, no target flags, and a pkg-config that finds
-# nothing rather than target libraries. cc-rs and pkg-config-rs (build scripts, proc macros)
-# read the same per triple as <VAR>_<build triple>
-def build-machine-tools [plat: record]: nothing -> record {
+# only the build libraries (spec buildLibraries), never target libraries. cc-rs and pkg-config-rs
+# (build scripts, proc macros) read the same per triple as <VAR>_<build triple>
+def build-machine-tools [plat: record, build_pc: list<string>]: nothing -> record {
   if not $plat.cross { return {CC_FOR_BUILD: "cc", CXX_FOR_BUILD: "c++", CPP_FOR_BUILD: "cc -E", PKG_CONFIG_FOR_BUILD: "pkg-config"} }
   let dir = $"($env.NIX_BUILD_TOP)/for-build"
   mkdir $"($dir)/no-pc"
-  $"#!/bin/sh\nPKG_CONFIG_PATH= PKG_CONFIG_LIBDIR=($dir)/no-pc exec pkg-config \"$@\"\n" | save -f $"($dir)/pkg-config"
+  let libdir = (if ($build_pc | is-empty) { $"($dir)/no-pc" } else { $build_pc | str join ":" })
+  $"#!/bin/sh\nPKG_CONFIG_PATH= PKG_CONFIG_LIBDIR=($libdir) exec pkg-config \"$@\"\n" | save -f $"($dir)/pkg-config"
   chmod +x $"($dir)/pkg-config"
   let rs = ($plat.buildRustTriple | str replace -a "-" "_")
   {CC_FOR_BUILD: "cc-build", CXX_FOR_BUILD: "c++-build", CPP_FOR_BUILD: "cc-build -E", PKG_CONFIG_FOR_BUILD: $"($dir)/pkg-config"
@@ -70,7 +71,7 @@ export def --env main [
   let njobs = ($env.NIX_BUILD_CORES? | default "0" | into int | if $in > 0 { $in } else { sys cpu | length })
   let deps = (dep-closure $a.dependencies)
   env $a $deps $out
-  let plat = (resolve-platform $a.platform)
+  let plat = (resolve-platform $a.platform (dep-dirs (env build-libraries $a) pkgconfigDirs))
   let cache = ($"($env.NIX_STORE | path dirname)/var/nix/jigd/socket" | path exists)
   if $cache { load-env (env compiler-caches) }
 
