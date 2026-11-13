@@ -235,19 +235,27 @@ let
     // builtins.mapAttrs (n: dir: callPackage dir n) packages
     // aliases;
   # unversioned names for the default line of multi-version packages (pkgs/aliases.toml)
+  aliasTargets = builtins.fromTOML (builtins.readFile ../pkgs/aliases.toml);
+  # aliases go on top of every package, so an out-of-tree one with an alias's name would be dropped
+  aliasTaken = builtins.filter (n: aliasTargets ? ${n}) (builtins.attrNames packages);
   aliases = builtins.mapAttrs (
     alias: target:
     if builtins.pathExists (../pkgs + "/${builtins.substring 0 2 alias}/${alias}/package.nix") then
       throw "alias ${alias} shadows a package directory"
     else
       self.${target}
-  ) (builtins.fromTOML (builtins.readFile ../pkgs/aliases.toml));
+  ) aliasTargets;
 in
 {
   # attrNames alone would not force the platform: `list --for typo` showed this machine's set
   pkgs = builtins.seq stage (
     if unknownOverrides != [ ] then
       throw "overrides: no packages named ${toString unknownOverrides}"
+    else if aliasTaken != [ ] then
+      let
+        n = builtins.head aliasTaken;
+      in
+      throw "packages: ${n} is an alias (pkgs/aliases.toml: ${n} -> ${aliasTargets.${n}}), which would hide the package; replace ${aliasTargets.${n}} or choose another name"
     else
       self
   );

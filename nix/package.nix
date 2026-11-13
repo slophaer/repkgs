@@ -639,6 +639,9 @@ drv
   platform = platform.name;
   # what package.nix wrote and read, for `variant`
   args = args0;
+  # the programs it declares (`bin`, after overrides; finish.nu runs each with --version), or null.
+  # What bin/ holds is known only after the build (exports.json)
+  bin = args.bin or null;
   sources = sources0;
   decl = args0.features or { };
   inherit dir features fn;

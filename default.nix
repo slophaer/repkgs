@@ -12,7 +12,8 @@
   # one tree or a list of them: { zlib.autotools.flags.append = [ … ]; } (nix/overrides.nix)
   overrides ? { },
   # out-of-tree packages: name -> directory with package.nix (+ sources.toml), called like
-  # in-tree ones. A name that exists in the tree is replaced
+  # in-tree ones. A name that exists in the tree is replaced; an alias's name (pkgs/aliases.toml)
+  # is an error
   packages ? { },
   # set-wide feature values, for every package that declares the name (nix/features.nix)
   features ? { },
