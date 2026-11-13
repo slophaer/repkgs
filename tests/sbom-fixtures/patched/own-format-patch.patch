@@ -1,0 +1,18 @@
+From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
+From: A Packager <a@example.org>
+Date: Thu, 1 Oct 2026 10:00:00 +0200
+Subject: [PATCH] build: fix the install of the
+ frobnicator
+
+The commit is our own: its sha names no upstream commit. See
+https://example.org/bugs/1.
+---
+ x.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/x.c b/x.c
+--- a/x.c
++++ b/x.c
+@@ -1 +1 @@
+-int x;
++int x = 2;

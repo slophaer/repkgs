@@ -124,6 +124,12 @@ the ones whose programs the package runs at run time.
 launchers, Windows DLLs or the platform's executable suffix. A consumer that links names reads
 them there.
 
+A patch that is an upstream commit says so in its message, `(cherry picked from commit <sha>)` or
+DEP-3 `Origin: upstream`, and the SBOM (`set.sbom`) lists it as a backport with a link to the
+commit; any other patch is the package's own. A package without sources.toml tells the SBOM
+where its source is from: `upstream = { purl = "pkg:…"; }`, or `sourceOf = { package =
+pkgs.systemd; subpath = "hwdb.d"; }` when it builds from another package's source.
+
 `prefix = "/usr"` configures a fixed install prefix in autotools, Meson, CMake and make. They install
 through `DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and
 `cmake.defs.CMAKE_INSTALL_PREFIX` override the common field; configure and install use the same

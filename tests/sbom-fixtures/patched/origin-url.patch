@@ -1,0 +1,9 @@
+Description: take the fix for the parser
+Origin: backport, https://gitlab.example.org/team/patched/-/commit/5555555
+Bug: https://example.org/bugs/5
+
+--- a/x.c
++++ b/x.c
+@@ -1 +1 @@
+-int x;
++int x = 5;

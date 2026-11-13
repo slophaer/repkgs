@@ -166,6 +166,92 @@ let
     p: ref:
     (componentAt hooked.bom ref).properties
     == ((componentAt plain.bom ref).properties or [ ]) ++ propertiesFor p;
+  # pedigree.patches: each patch's type, link and text, from the file alone
+  fixture = f: ./sbom-fixtures/patched + "/${f}";
+  patchFiles = [
+    "bare.patch"
+    "own-format-patch.patch"
+    "cherry-picked.patch"
+    "origin-upstream.patch"
+    "origin-url.patch"
+  ];
+  patched = {
+    name = "patched-2.0";
+    pname = "patched";
+    version = "2.0";
+    dir = ./sbom-fixtures/patched;
+    # a fetched patch is a store path, not read at evaluation
+    patches = map fixture patchFiles ++ [ (builtins.toFile "fetched.patch" "") ];
+    dependencies = [ ];
+  };
+  componentOf =
+    args: n: builtins.head (builtins.filter (c: c.name == n) (set.sbom args).bom.components);
+  patchesOf = (componentOf { roots = [ patched ]; } "patched").pedigree.patches;
+  patchAt = builtins.elemAt patchesOf;
+  withPedigree =
+    pedigree:
+    componentOf {
+      roots = [ patched ];
+      extraFields = _: { inherit pedigree; };
+    } "patched";
+
+  # sourceOf and upstream, on records and through package.nix
+  derived = {
+    name = "derived-1";
+    pname = "derived";
+    version = "1";
+    sourceOf = {
+      package = set.pkgs.jq;
+      subpath = "src/x";
+    };
+    dependencies = [ ];
+  };
+  derivedTwice = {
+    name = "twice-1";
+    pname = "twice";
+    version = "1";
+    sourceOf = {
+      package = derived;
+      subpath = "y";
+    };
+    dependencies = [ ];
+  };
+  fromCpe = {
+    name = "fromcpe-1";
+    pname = "fromcpe";
+    version = "1";
+    sourceOf.package = withcpe;
+    dependencies = [ ];
+  };
+  jqPurl = (byName "jq").purl;
+  local = setWith {
+    packages = {
+      sbom-derived = ./sbom-fixtures/derived;
+      sbom-upstream = ./sbom-fixtures/upstream;
+    };
+  };
+  setWith = args: import ../nix/set.nix ({ inherit system; } // args);
+  localComponent = n: componentOf { roots = [ local.pkgs.${n} ]; } n;
+  refused =
+    overrides:
+    !(builtins.tryEval (
+      builtins.deepSeq
+        (setWith {
+          packages.sbom-upstream = ./sbom-fixtures/upstream;
+          inherit overrides;
+        }).pkgs.sbom-upstream.drvPath
+        true
+    )).success;
+
+  refusedSourceOf =
+    o:
+    refused {
+      sbom-upstream = {
+        upstream.remove = true;
+        sourceOf.set = o;
+      };
+    };
+
   callbackDrv =
     ref:
     (builtins.head (builtins.filter (p: p.name == "test:drv") (componentAt hooked.bom ref).properties))
@@ -282,4 +368,91 @@ assert
 assert depsOf hooked.bom (rootRef 4) == [ libcRef ];
 assert depsOf hooked.bom onigRef == [ libcRef ];
 assert depsOf hooked.bom libcRef == [ ];
+
+# A patch is a backport only when it says so; format-patch's From line alone does not
+assert
+  map (p: p.type) patchesOf == [
+    "unofficial"
+    "unofficial"
+    "backport"
+    "backport"
+    "backport"
+    "unofficial"
+  ];
+assert
+  map (p: p.diff.url) patchesOf == [
+    "bare.patch"
+    "own-format-patch.patch"
+    "https://github.com/example/patched/commit/3333333333333333333333333333333333333333"
+    "https://github.com/example/patched/commit/4444444444444444444444444444444444444444"
+    "https://gitlab.example.org/team/patched/-/commit/5555555"
+    "fetched.patch"
+  ];
+assert
+  (patchAt 0).diff.text == {
+    contentType = "text/x-diff";
+    content = builtins.readFile (fixture "bare.patch");
+  };
+assert !((patchAt 0) ? resolves) && !((patchAt 5).diff ? text);
+assert
+  (patchAt 1).resolves == [
+    {
+      type = "defect";
+      name = "build: fix the install of the frobnicator";
+      references = [ "https://example.org/bugs/1" ];
+    }
+  ];
+# the backport markers' links are the commit, not an issue
+assert
+  (patchAt 4).resolves == [
+    {
+      type = "enhancement";
+      name = "take the fix for the parser";
+      references = [ "https://example.org/bugs/5" ];
+    }
+  ];
+assert !((byName "jq") ? pedigree);
+# a caller's pedigree goes over the generator's by key
+assert
+  (withPedigree { notes = "n"; }).pedigree == {
+    patches = patchesOf;
+    notes = "n";
+  };
+assert (withPedigree { patches = [ ]; }).pedigree == { patches = [ ]; };
+
+# sourceOf: the source package's purl and hash, a subpath, no cpe
+assert (componentOf { roots = [ derived ]; } "derived").purl == "${jqPurl}#src/x";
+assert (componentOf { roots = [ derived ]; } "derived").hashes == (byName "jq").hashes;
+assert (componentOf { roots = [ derived ]; } "derived").version == "1";
+assert (componentOf { roots = [ derivedTwice ]; } "twice").purl == "${jqPurl}#src/x/y";
+assert
+  (componentOf { roots = [ fromCpe ]; } "fromcpe").purl == "pkg:generic/withcpe@1.2"
+  && !((componentOf { roots = [ fromCpe ]; } "fromcpe") ? cpe);
+# package.nix takes both, keeps them out of the derivation and exposes them
+assert local.pkgs.sbom-derived.sourceOf.package.pname == "jq";
+assert !(local.pkgs.sbom-derived.spec ? sourceOf) && !(local.pkgs.sbom-upstream.spec ? upstream);
+assert (localComponent "sbom-derived").purl == "${jqPurl}#src";
+assert (localComponent "sbom-upstream").purl == "pkg:generic/sbom-upstream@3";
+assert (localComponent "sbom-upstream").cpe == "cpe:2.3:a:example:sbom-upstream:3:*:*:*:*:*:*:*";
+# and refuses what the generator could not read
+assert refused { sbom-upstream.upstream.set.cpe = "x"; };
+assert refused { sbom-upstream.upstream.set = "pkg:generic/x"; };
+# sourceOf in place of upstream: a package is required, the subpath relative
+assert refusedSourceOf { subpath = "x"; };
+assert refusedSourceOf {
+  package = set.pkgs.jq;
+  subpath = "../x";
+};
+assert
+  !(refusedSourceOf {
+    package = set.pkgs.jq;
+    subpath = "x/y";
+  });
+# one source: not both, and not beside a sources.toml
+assert refused { sbom-upstream.sourceOf.set.package = set.pkgs.jq; };
+assert
+  !(builtins.tryEval (
+    builtins.deepSeq (setWith { overrides.jq.upstream.set.purl = "pkg:generic/x"; }).pkgs.jq.drvPath
+      true
+  )).success;
 hooked
