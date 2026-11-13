@@ -30,11 +30,24 @@ def store-roots [a: record, deps: list<record>]: nothing -> list<string> {
   ($deps | get root) ++ $a.buildDependencies ++ (which cc | each {|c| open --raw ($c.path | path dirname -n 2 | path join etc/roots) | split row " " } | flatten | compact -e) | uniq
 }
 
+# a compiler's toolchain root, the key of its $PKGS_CC entry: jig reads etc/jig.json beside the
+# real path of its executable
+def cc-root [cc: string]: nothing -> string { which $cc | get 0.path | path expand | path dirname -n 2 }
+
 # the python modules of the build tools and of what they propagate (jinja2 brings markupsafe), for
 # whatever runs python during the build: meson's python.find_installation(modules: […]), code
 # generators. Build platform only, like the tools: the python build system adds the target's
 def build-site-packages [a: record]: nothing -> list<string> {
   dep-closure $a.buildDependencies | each {|d| files --dirs $"($d.root)/lib/python3*/site-packages" } | flatten
+}
+
+# bindgen parses headers with libclang, which knows neither the toolchain's target and sysroot nor
+# the dependencies' headers: hand it those cc uses, from the toolchain's jig.json. Not its
+# -resource-dir: libclang brings its own builtin headers, of its own version
+def bindgen-args [deps: list<record>]: nothing -> string {
+  let conf = $"(cc-root cc)/etc/jig.json"
+  let toolchain = (if ($conf | path exists) { open $conf | get -o flags | default [] | where { $in =~ '^(--target=|--sysroot=|-isystem)' } } else { [] })
+  $toolchain ++ (dep-dirs $deps includeDirs | each { $"-isystem($in)" }) | str join " "
 }
 
 # how compilers and build systems find the dependencies, and what jig needs for its cache keys:
@@ -56,6 +69,7 @@ def toolchain [a: record, deps: list<record>]: nothing -> record {
     JIG_STORE_IDENTITY: content
     JIG_STORE_ROOTS: (store-roots $a $deps | str join " ")
     PKGS_PREFIX_MAP: ([$"($env.NIX_BUILD_TOP)=/build"] ++ ($deps | get root | each { do $mask $in deps }) ++ ($a.buildDependencies | each { do $mask $in tools }) | str join ":")
+    BINDGEN_EXTRA_CLANG_ARGS: (bindgen-args $deps)
   } | merge (if ($site | is-empty) { {} } else { {PYTHONPATH: ($site | str join ":")} })
 }
 
@@ -74,8 +88,7 @@ def package-cc [a: record, deps: list<record>]: nothing -> record {
     cxxflags: ($h.cxxflags ++ ($cc.cxxflags? | default []))
     ldflags: ((dep-dirs $deps libDirs | each { $"-L($in)" }) ++ $h.ldflags ++ ($cc.ldflags? | default []))
   }
-  let root = (which cc | get 0.path | path expand | path dirname -n 2)
-  {PKGS_CC: ({$root: $flags} | to json -r), CARGO_PROFILE_RELEASE_DEBUG: $g.1, CARGO_PROFILE_RELEASE_STRIP: none}
+  {PKGS_CC: ({(cc-root cc): $flags} | to json -r), CARGO_PROFILE_RELEASE_DEBUG: $g.1, CARGO_PROFILE_RELEASE_STRIP: none}
 }
 
 # rustc and go go through jig only when the environment says so, and more than their own build
