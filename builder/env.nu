@@ -30,6 +30,13 @@ def store-roots [a: record, deps: list<record>]: nothing -> list<string> {
   ($deps | get root) ++ $a.buildDependencies ++ (which cc | each {|c| open --raw ($c.path | path dirname -n 2 | path join etc/roots) | split row " " } | flatten | compact -e) | uniq
 }
 
+# the python modules of the build tools and of what they propagate (jinja2 brings markupsafe), for
+# whatever runs python during the build: meson's python.find_installation(modules: […]), code
+# generators. Build platform only, like the tools: the python build system adds the target's
+def build-site-packages [a: record]: nothing -> list<string> {
+  dep-closure $a.buildDependencies | each {|d| files --dirs $"($d.root)/lib/python3*/site-packages" } | flatten
+}
+
 # how compilers and build systems find the dependencies, and what jig needs for its cache keys:
 # content identity (a rebuilt but identical dependency still hits), the store roots masked
 # header names map back to, and a prefix map so no build or store path lands in DWARF/__FILE__
@@ -38,6 +45,7 @@ def toolchain [a: record, deps: list<record>]: nothing -> record {
   # aclocal macros from build tools (automake, libtool, pkgconf) and runtime deps
   let build_aclocal = ($a.buildDependencies | each {|p| (exports-of $p).aclocalDirs | each {|d| $"($p)/($d)"} } | flatten)
   let deps_aclocal = (dep-dirs $deps aclocalDirs)
+  let site = (build-site-packages $a)
   {
     CC: cc, CXX: c++, AR: llvm-ar, RANLIB: llvm-ranlib, NM: llvm-nm, STRIP: llvm-strip
     PKG_CONFIG_PATH: (dep-dirs $deps pkgconfigDirs | str join ":")
@@ -48,7 +56,7 @@ def toolchain [a: record, deps: list<record>]: nothing -> record {
     JIG_STORE_IDENTITY: content
     JIG_STORE_ROOTS: (store-roots $a $deps | str join " ")
     PKGS_PREFIX_MAP: ([$"($env.NIX_BUILD_TOP)=/build"] ++ ($deps | get root | each { do $mask $in deps }) ++ ($a.buildDependencies | each { do $mask $in tools }) | str join ":")
-  }
+  } | merge (if ($site | is-empty) { {} } else { {PYTHONPATH: ($site | str join ":")} })
 }
 
 # $PKGS_CC: what jig adds to every target cc command line (dependency dirs, defaults, hardening,
