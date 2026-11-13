@@ -109,7 +109,11 @@ Dependencies are found through the ordinary search paths (`-I`, `-L`, pkg-config
 the package says nothing more about them. The build tools' python modules, with what they
 propagate, are on `PYTHONPATH` in every build, so meson's `python.find_installation(modules: …)`
 and code generators find them. bindgen gets the toolchain's target, sysroot and the dependencies'
-headers through `BINDGEN_EXTRA_CLANG_ARGS`. `patches = [ ./x.patch ]` are applied after unpacking.
+headers through `BINDGEN_EXTRA_CLANG_ARGS`. `buildLibraries = [ buildPkgs.elfutils ]` names
+libraries the build machine's compiler links (`CC_FOR_BUILD`, a kernel's `HOSTCC`): their
+headers, libraries and `.pc` files reach that compiler and `PKG_CONFIG_FOR_BUILD`, and what links
+them runs during the build. Natively that compiler is `cc`, so it sees them after the
+dependencies. `patches = [ ./x.patch ]` are applied after unpacking.
 `bin = [ "rg" ]` names the executables when they differ from the package name.
 Libraries in `[pin] sys` (written by uptrack from the lock files) are linked, not run: a launcher
 puts an ordinary dependency's `bin/` on `PATH`, but not theirs. `sysTools = [ "sqlite" ]` names

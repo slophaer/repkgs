@@ -11,11 +11,11 @@
 #   features on a package only: { <feature> = value; }, no verbs (nix/features.nix)
 # One node applies as set, remove, merge, prepend/append: `merge`/`append`/`prepend` create a
 # missing field (or refill one `remove = true` dropped), and a list `remove` also filters what
-# merge/append/prepend add. In dependencies/buildDependencies a string names a package of the
-# final set, and remove matches by package name. `overrides` may be a list of trees: they are
-# merged first (set/edit: last wins, list verbs concatenate, `remove = true` beats element
-# removes), then applied once per package. Unknown package, remove of a missing field, a verb
-# argument of the wrong type, or a verb that does not fit the value's type is an error.
+# merge/append/prepend add. In dependencies, buildDependencies and buildLibraries a string names a
+# package of the final set, and remove matches by package name. `overrides` may be a list of
+# trees: they are merged first (set/edit: last wins, list verbs concatenate, `remove = true` beats
+# element removes), then applied once per package. Unknown package, remove of a missing field, a
+# verb argument of the wrong type, or a verb that does not fit the value's type is an error.
 let
   inherit (builtins)
     all
@@ -70,6 +70,7 @@ let
   depFields = [
     "dependencies"
     "buildDependencies"
+    "buildLibraries"
   ];
   pname = d: d.pname or d.name or (toString d);
 
