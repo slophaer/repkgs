@@ -1,0 +1,7 @@
+# A record for tests/sbom.nix: a github purl, so a backported patch links its commit.
+[upstream]
+purl = "pkg:github/example/patched"
+
+[pin]
+version = "2.0"
+tag = "v2.0"

@@ -80,6 +80,8 @@ let
     "completions"
     "prefix"
     "stagedRoots"
+    "upstream"
+    "sourceOf"
   ];
 
   # the part of every derivation that is the same across the set: built once
@@ -347,6 +349,50 @@ let
       ) (attrNames args.features)
     else
       [ ];
+  # where the SBOM (nix/sbom.nix) finds a source without sources.toml: `upstream = { purl; cpe?; }`
+  # as its [upstream] would say, or `sourceOf = { package; subpath?; }`, built from another
+  # package's source (a purl subpath: relative, `/`-separated, no `.` or `..`)
+  subpathRe = "[A-Za-z0-9_~-][A-Za-z0-9._~-]*(/[A-Za-z0-9_~-][A-Za-z0-9._~-]*)*";
+  originError =
+    let
+      u = args.upstream;
+      o = args.sourceOf;
+      only = set: keys: isAttrs set && removeAttrs set keys == { };
+    in
+    if args ? upstream && args ? sourceOf then
+      "upstream and sourceOf: one source, one of them"
+    else if (args ? upstream || args ? sourceOf) && sources0 != null then
+      "${
+        if args ? upstream then "upstream" else "sourceOf"
+      }: the package has a sources.toml, its [upstream] is the record"
+    else if
+      args ? upstream
+      && !(
+        only u [
+          "purl"
+          "cpe"
+        ]
+        && isString (u.purl or null)
+        && match "pkg:[a-z]+/.+" u.purl != null
+        && isString (u.cpe or "")
+      )
+    then
+      "upstream: want { purl = \"pkg:<type>/…\"; cpe? = \"cpe:2.3:…\"; }"
+    else if
+      args ? sourceOf
+      && !(
+        only o [
+          "package"
+          "subpath"
+        ]
+        && isAttrs (o.package or null)
+        && o.package ? pname
+        && (!(o ? subpath) || isString o.subpath && match subpathRe o.subpath != null)
+      )
+    then
+      "sourceOf: want { package = pkgs.<name>; subpath? = \"<relative path, no . or ..>\"; }"
+    else
+      null;
   checks =
     if badFeatures != [ ] then
       fail "features ${toString badFeatures}: want { default (bool, string, list or int), values? (a list the default is from), doc? }"
@@ -358,6 +404,8 @@ let
       fail "sysTools ${toString strayTools}: not in [pin] sys (sysTools names the sys libraries whose programs the package runs)"
     else if wrongPlatform != [ ] then
       fail (join "; " wrongPlatform)
+    else if originError != null then
+      fail originError
     else
       true;
 
@@ -556,6 +604,9 @@ let
       "buildLibraries"
       "dependencies"
       "bootstrapTools"
+      # SBOM records, not build input
+      "upstream"
+      "sourceOf"
     ]
     // (if args ? tests then { tests = removeAttrs args.tests [ "dependencies" ]; } else { })
     // listToAttrs (
@@ -648,6 +699,8 @@ drv
   inherit supported unsupportedReason script;
 }
 // (if separate then { tests = testsDrv; } else { })
+// (if args ? upstream then { inherit (args) upstream; } else { })
+// (if args ? sourceOf then { inherit (args) sourceOf; } else { })
 // (
   if supported then
     { }

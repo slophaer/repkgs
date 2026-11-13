@@ -4,19 +4,26 @@
 # the derivation: package.nix's own list plus [pin] sys libraries and the build systems'), not the
 # store references. Version, purl and source hash come from each package's directory:
 # `dir`/sources.toml `[upstream] purl`, the pinned version (`version`) and the source fetch's
-# `outputHash` (`src`). `libc0` ({ name, dir } or null) is implicit in every ELF link and a bootstrap
-# stage with no package of its own, so it joins as a component read from its directory's
-# sources.toml, and in the dependsOn of each other one.
+# `outputHash` (`src`). A package without sources.toml says it in package.nix: `upstream = {
+# purl; cpe?; }` for its own source, or `sourceOf = { package; subpath?; }` when it is built from
+# another package's source; it then gets that package's purl, plus `#<subpath>`, and source hash,
+# and no cpe (it is not that project's product). `libc0` ({ name, dir } or null) is implicit in
+# every ELF link and a bootstrap stage with no package of its own, so it joins as a component read
+# from its directory's sources.toml, and in the dependsOn of each other one.
 # A component is one derivation: two of the same name and version (variants, two sets) stay two.
 # Their bom-refs, <name>@<version>, get #<drv hash prefix> appended when they would collide.
 #
 # A `cpe` in `[upstream]` becomes the component's `cpe`, `{version}` replaced by the version
 # (nixpkgs' meta.identifiers.cpe is the model).
 #
+# A package's `patches` become `pedigree.patches` (nix/sbom-patches.nix): the whole text of each,
+# "backport" with the upstream commit when the patch says it is one, else "unofficial".
+#
 # Callers add to a component with two hooks: `extraProperties p` returns properties appended to
 # its own, and `extraFields p` returns whole CycloneDX fields (`pedigree`, `supplier`, …) merged
 # in. A field the generator sets (type, bom-ref, name, version, purl, cpe, hashes, properties)
-# cannot be replaced: that fails, so a hook cannot change a component's identity.
+# cannot be replaced: that fails, so a hook cannot change a component's identity. A `pedigree`
+# from the hook is merged over the generator's by key (its `patches` replace the generator's).
 #
 # Approximations, each marked with a `repkgs:approximation` property:
 #  - a derivation without `dir` (toolchain, bootstrap stages, seed) has no
@@ -96,12 +103,42 @@ let
   };
   pkgsOf = map (n: n.p) closure;
 
+  # sources.toml, or package.nix's `upstream` as its [upstream] table
   tomlOf =
     p:
     if p ? dir && pathExists (p.dir + "/sources.toml") then
       fromTOML (readFile (p.dir + "/sources.toml"))
+    else if p ? upstream then
+      { inherit (p) upstream; }
     else
       null;
+
+  # the package whose source this one is built from, its record, and the purl subpath into it
+  originOf =
+    p:
+    if p ? sourceOf then
+      let
+        o = originOf p.sourceOf.package;
+        sub = p.sourceOf.subpath or null;
+      in
+      o
+      // {
+        subpath =
+          if sub == null then
+            o.subpath
+          else if o.subpath == null then
+            sub
+          else
+            "${o.subpath}/${sub}";
+      }
+    else
+      {
+        pkg = p;
+        toml = tomlOf p;
+        subpath = null;
+      };
+
+  patches = import ./sbom-patches.nix;
 
   # pkg:github/jqlang/jq?x=y -> pkg:github/jqlang/jq@v1.8.1
   purlOf =
@@ -165,21 +202,27 @@ let
       clash = builtins.filter (f: builtins.elem f ownFields) (builtins.attrNames extra);
     in
     if clash == [ ] then
-      c // extra
+      c
+      // extra
+      // (if c ? pedigree && extra ? pedigree then { pedigree = c.pedigree // extra.pedigree; } else { })
     else
       throw "sbom: extraFields for ${p.name} sets ${builtins.concatStringsSep ", " clash}, a field the generator owns; use extraProperties for properties";
 
   component =
     p:
     let
-      t = tomlOf p;
-      known = t != null && t ? upstream.purl && p ? version;
-      hashes = if t == null then [ ] else hashesOf p;
+      o = originOf p;
+      t = o.toml;
+      known = t != null && t ? upstream.purl && o.pkg ? version;
+      purl = purlOf o.pkg t + (if o.subpath == null then "" else "#${o.subpath}");
+      hashes = if t == null then [ ] else hashesOf o.pkg;
       cpe =
-        if t != null && t ? upstream.cpe && p ? version then
+        if !(p ? sourceOf) && t != null && t ? upstream.cpe && p ? version then
           builtins.replaceStrings [ "{version}" ] [ p.version ] t.upstream.cpe
         else
           null;
+      # the source's purl as written: commit links of backported patches
+      pedigree = patches.of p (if known then t.upstream.purl else null);
     in
     withFields p (
       {
@@ -188,7 +231,7 @@ let
         name = p.pname or p.name;
       }
       // (if p ? version && p.version != "" then { inherit (p) version; } else { })
-      // (if known then { purl = purlOf p t; } else { })
+      // (if known then { inherit purl; } else { })
       // (if cpe == null then { } else { inherit cpe; })
       // (if hashes == [ ] then { } else { inherit hashes; })
       // (
@@ -203,6 +246,7 @@ let
         in
         if properties == [ ] then { } else { inherit properties; }
       )
+      // (if pedigree == [ ] then { } else { pedigree.patches = pedigree; })
     );
 
   graph = map (p: {
