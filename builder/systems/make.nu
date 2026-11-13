@@ -1,4 +1,5 @@
 use ../core.nu *
+use ../prefix.nu
 
 # plain Makefile projects: make [targets] flags, in the source tree, after the project's
 # hand-written `make.configureScript` when it has one. autotools.nu builds on this
@@ -21,13 +22,26 @@ export def --env setup []: nothing -> nothing {
 
 export def workdir []: nothing -> string { project-dir make }
 
+# the install prefix: a declared spec.prefix, or the scratch output. A declared one is the only
+# one: a raw PREFIX=/prefix= or --prefix would configure or install elsewhere. Without one, raw
+# flags stay the package's business (those that install by hand)
+def install-prefix []: nothing -> string {
+  let o = (options make)
+  if (ctx).spec.prefix? != null {
+    prefix check-flags ($o.flags ++ $o.installFlags) '^(PREFIX|prefix)=' prefix
+    prefix check-flags $o.configureFlags '^--prefix($|=)' prefix
+  }
+  prefix resolve
+}
+
 # #!/bin/sh would be the sandbox's. MAKEFLAGS for scripts that compile (cmake's bootstrap)
 export def configure []: nothing -> nothing {
   let c = (ctx); let o = (options make)
+  let prefix = (install-prefix)
   let script = $"./($o.configureScript)"
   if not ($script | path exists) { return }
   let argv = (if (open --raw $script | lines | first) =~ '^#! ?/bin/sh' { [$env.CONFIG_SHELL $script] } else { [$script] })
-  with-env {MAKEFLAGS: $"-j($c.njobs)"} { x ($argv | first) ...($argv | skip 1) $"--prefix=($c.out)" ...$o.configureFlags }
+  with-env {MAKEFLAGS: $"-j($c.njobs)"} { x ($argv | first) ...($argv | skip 1) $"--prefix=($prefix)" ...$o.configureFlags }
 }
 
 export def run-build [flags: list<string>, targets: list<string>]: nothing -> nothing { x make $"-j((ctx).njobs)" ...$targets ...$flags }
@@ -54,12 +68,21 @@ def with-programs [programs: list<string>, install: closure]: nothing -> nothing
 # compiling. Placed first so make.flags can override both
 def flags []: nothing -> list<string> {
   let c = (ctx)
-  [$"PREFIX=($c.out)" $"prefix=($c.out)"] ++ (if $c.platform.cross { [$"UNAME=($c.platform.osNames.uname)"] } else { [] }) ++ (options make).flags
+  let prefix = (install-prefix)
+  [$"PREFIX=($prefix)" $"prefix=($prefix)"] ++ (if $c.platform.cross { [$"UNAME=($c.platform.osNames.uname)"] } else { [] }) ++ (options make).flags
 }
 
 export def build []: nothing -> nothing { run-build (flags) (options make).buildTarget }
 export def test []: nothing -> nothing { run-test (flags) (options make).testTarget }
+# With spec.prefix, install via DESTDIR (also on the command line: a Makefile may assign it) and
+# copy the prefix subtree to $out
 export def install []: nothing -> nothing {
   let o = (options make)
-  with-programs $o.programs { run-install ((flags) ++ $o.installFlags) $o.installTarget }
+  let prefix = (install-prefix)
+  with-programs $o.programs {
+    prefix install $prefix {
+      let destdir = (if $prefix != (ctx).out { [$"DESTDIR=($env.DESTDIR)"] } else { [] })
+      run-install ((flags) ++ $o.installFlags ++ $destdir) $o.installTarget
+    }
+  }
 }

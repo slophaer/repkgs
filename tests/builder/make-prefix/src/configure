@@ -1,0 +1,7 @@
+#!/bin/sh
+# hand-written, not autoconf: records the prefix it was given
+for arg do
+    case "$arg" in
+        --prefix=*) echo "${arg#--prefix=}" > configured-prefix ;;
+    esac
+done

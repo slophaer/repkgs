@@ -118,15 +118,19 @@ the ones whose programs the package runs at run time.
 launchers, Windows DLLs or the platform's executable suffix. A consumer that links names reads
 them there.
 
-`prefix = "/usr"` configures a fixed install prefix in autotools, Meson and CMake. They install through
-`DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and
+`prefix = "/usr"` configures a fixed install prefix in autotools, Meson, CMake and make. They install
+through `DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and
 `cmake.defs.CMAKE_INSTALL_PREFIX` override the common field; configure and install use the same
 value. `/` also works. The builders make pkg-config prefixes relative in `lib`, `share` and
 multiarch directories. Use these fields, not raw prefix flags: configure's prefix flags and an
 autotools `prefix=` in `makeFlags` or `installFlags` are rejected, so install cannot silently use
-a different prefix. Prefixes must be absolute and contain no `..`
-components. An unexpected staged file outside that prefix is an error; use a package-local
-install phase to keep files from other roots.
+a different prefix. make takes the prefix as `PREFIX=` and `prefix=` and passes `--prefix` to a
+hand-written configure; with a declared prefix, raw ones in `make.flags`, `make.installFlags` or
+`make.configureFlags` are rejected. Prefixes must be absolute and contain no `..`
+components. An unexpected staged file outside that prefix is an error. `stagedRoots` names the
+other roots a package keeps or drops: `stagedRoots = { "/etc" = "share/factory/etc"; "/var" =
+null; }` copies the staged `/etc` to that output directory and drops `/var`, a nested root
+(`"/etc/ssh"`) before its parent.
 
 Lock files need no translation. For Cargo, Go, npm, pnpm, Yarn, Bundler, Deno, Hex, Hackage and
 LuaRocks, the lock file in the source is turned into fixed-output fetches at build time, by a
