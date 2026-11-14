@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "base.h"
+#include "dlopen_note.h"
 #include "keys.h"
 #include "store.h"
 
@@ -207,11 +208,52 @@ auto PackageFlags(const fs::path& root) -> PackageCcFlags {
   return flags;
 }
 
+// RUNPATH for dlopen(): each soname a link input names in .note.dlopen (dlopen_note.h) that a
+// store -L dir has puts that dir on RUNPATH, as -l does for NEEDED. reloc-fixup keeps a dir that
+// served no NEEDED, so the output dlopen()s its dependencies with no -rpath from the package.
+// Inputs are objects and archive members: a one-step compile and link hides its object, and
+// finish's dlopen-check reports what is still out of reach
+void AddDlopenEntries(std::span<const std::string> args, const std::string& output, RunpathList& runpath) {
+  const Store& store = Store::Get();
+  std::vector<std::string> dirs;
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (std::optional<std::string> dir = FlagValue(args, i, "-L")) {
+      std::string real = RealDir(*dir);
+      if (store.IsStorePath(real) && !std::ranges::contains(dirs, real)) {
+        dirs.push_back(std::move(real));
+      }
+    }
+  }
+  if (dirs.empty()) {
+    return;
+  }
+  std::vector<std::string> sonames;
+  for (const std::string& arg : args) {
+    if (arg.starts_with('-') || arg == output) {
+      continue;
+    }
+    for (std::string& soname : LinkInputDlopenSonames(arg)) {
+      if (!std::ranges::contains(sonames, soname)) {
+        sonames.push_back(std::move(soname));
+      }
+    }
+  }
+  for (const std::string& soname : sonames) {
+    const auto dir = std::ranges::find_if(
+        dirs, [&](const std::string& lib_dir) -> bool { return fs::exists(fs::path(lib_dir) / soname); });
+    if (dir != dirs.end()) {
+      runpath.Add(*dir);
+    }
+  }
+}
+
 // RUNPATH candidates: -L dirs from argv as well as from $PKGS_CC. Returns the -l count
 auto CollectRunpath(const DriverConf& conf, bool cxx, UserArgs& user) -> size_t {
   std::vector<std::string> link_args = user.args;
   link_args.insert(link_args.end(), conf.package.ldflags.begin(), conf.package.ldflags.end());
-  return AddRunpathEntries(conf, cxx, link_args, user.runpath);
+  const size_t libs = AddRunpathEntries(conf, cxx, link_args, user.runpath);
+  AddDlopenEntries(link_args, user.output, user.runpath);
+  return libs;
 }
 
 // What differs per binary format: how the build system's arguments pass through, what every

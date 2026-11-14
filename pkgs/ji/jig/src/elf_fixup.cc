@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "base.h"
+#include "dlopen_note.h"
 #include "fixup_mode.h"
 #include "store.h"
 
@@ -49,6 +50,8 @@ struct RunpathDir {
   std::string entry;
   fs::path dir;
   bool keep = true;
+  bool dlopen = false;   // provides a soname the file's .note.dlopen names: stays
+  bool sibling = false;  // the file's own dir, a lib dir of the package: stays if there is room
   // the dynamic linker's own directory: what lives there is NEEDED by soname everywhere
   [[nodiscard]] auto IsLibc() const -> bool { return fs::exists(dir / "libc.so.6"); }
 };
@@ -170,19 +173,71 @@ auto RelativizeRunpath(const FixupContext& ctx, const std::string& old, const fs
     }
   }
   for (const fs::path& own : ctx.own_lib_dirs) {
-    runpath.push_back({.entry = RelativeTo(final_here, ctx.Final(own), kOrigin), .dir = own, .keep = false});
+    runpath.push_back({
+        .entry = RelativeTo(final_here, ctx.Final(own), kOrigin),
+        .dir = own,
+        .keep = false,
+        .sibling = own.lexically_normal() == here.lexically_normal(),
+    });
   }
   return runpath;
 }
 
-auto RenderRunpath(const std::vector<RunpathDir>& runpath) -> std::string {
+// the first dir that provides each soname the file's .note.dlopen names
+void MarkDlopenDirs(std::vector<RunpathDir>& runpath, std::string_view image) {
+  for (const std::string& soname : ElfDlopenSonames(image)) {
+    const auto dir =
+        std::ranges::find_if(runpath, [&](const RunpathDir& rpd) -> bool { return fs::exists(rpd.dir / soname); });
+    if (dir != runpath.end()) {
+      dir->dlopen = true;
+    }
+  }
+}
+
+// siblings: whether the file's own dir stays for the libraries beside it, which it may dlopen()
+// by soname with no note (libtss2-tctildr its TCTIs, libpcsclite libpcsclite_real)
+auto RenderRunpath(const std::vector<RunpathDir>& runpath, bool siblings) -> std::string {
   std::vector<std::string> kept;
   for (const RunpathDir& dir : runpath) {
-    if (dir.keep && !std::ranges::contains(kept, dir.entry)) {
+    if ((dir.keep || dir.dlopen || (siblings && dir.sibling)) && !std::ranges::contains(kept, dir.entry)) {
       kept.push_back(dir.entry);
     }
   }
   return Join(kept, ":");
+}
+
+using DirectNeeded = std::vector<std::pair<const Needed*, RunpathDir*>>;
+
+auto DirectTarget(const std::pair<const Needed*, RunpathDir*>& dep) -> std::string {
+  return dep.second->entry + "/" + dep.first->name;
+}
+
+// {RUNPATH, RUNPATH + NUL + each direct NEEDED string} in at most `room` bytes: the file's own
+// dir goes first, then the NEEDED stay sonames and their dirs on RUNPATH. Longer than `room` when
+// even that does not fit
+auto FitRunpath(std::vector<RunpathDir>& runpath, DirectNeeded& direct, std::uint64_t room)
+    -> std::pair<std::string, std::string> {
+  const auto layout = [&](bool siblings) -> std::pair<std::string, std::string> {
+    const std::string neu = RenderRunpath(runpath, siblings);
+    std::string blob = neu;
+    for (const auto& dep : direct) {
+      blob.append(1, '\0').append(DirectTarget(dep));
+    }
+    return {neu, blob};
+  };
+  for (const bool siblings : {true, false}) {
+    if (auto fit = layout(siblings); fit.second.size() <= room) {
+      return fit;
+    }
+  }
+  for (const auto& dep : direct) {
+    dep.second->keep = true;
+  }
+  direct.clear();
+  if (auto fit = layout(true); fit.second.size() <= room) {
+    return fit;
+  }
+  return layout(false);
 }
 
 // Returns false on an unrecoverable inconsistency (already reported). Every NEEDED that a RUNPATH
@@ -190,7 +245,10 @@ auto RenderRunpath(const std::vector<RunpathDir>& runpath) -> std::string {
 // name with a slash directly, no directory search. The strings go where the padded RUNPATH was.
 // A dir leaves RUNPATH once its NEEDED are direct; libc's stays (its objects are NEEDED by soname
 // so an already mapped libc matches by name) and so do dirs that served no NEEDED: dlopen's.
-// If the slack does not suffice the NEEDED stay sonames and their dirs on RUNPATH
+// A dir that provides a soname of the file's .note.dlopen stays too, the package's own included,
+// and the file's own dir when it is a lib dir of the package (siblings dlopen()ed with no note).
+// If the slack does not suffice the own dir goes first, then the NEEDED stay sonames and their
+// dirs on RUNPATH
 auto FixRunpath(FixupContext& ctx, const fs::path& path, BinaryImage& elf, const std::vector<Section>& sections,
                 std::vector<std::string>& log, bool& dirty) -> bool {
   const DynamicInfo dynamic = ReadDynamic(elf, sections);
@@ -200,7 +258,8 @@ auto FixRunpath(FixupContext& ctx, const fs::path& path, BinaryImage& elf, const
   const std::uint64_t runpath_offset = *dynamic.runpath_offset;
   const std::string old = elf.CString(runpath_offset);
   std::vector<RunpathDir> runpath = RelativizeRunpath(ctx, old, path.parent_path());
-  std::vector<std::pair<const Needed*, RunpathDir*>> direct;
+  MarkDlopenDirs(runpath, elf.bytes());
+  DirectNeeded direct;
   for (const Needed& lib : dynamic.needed) {
     if (lib.name.contains('/') || lib.name.starts_with("ld-linux") || lib.name.starts_with("linux-vdso")) {
       continue;
@@ -218,19 +277,7 @@ auto FixRunpath(FixupContext& ctx, const fs::path& path, BinaryImage& elf, const
       direct.emplace_back(&lib, &*dir);
     }
   }
-  const auto target = [](const auto& dep) -> std::string { return dep.second->entry + "/" + dep.first->name; };
-  std::string neu = RenderRunpath(runpath);
-  std::string blob = neu;
-  for (const auto& dep : direct) {
-    blob.append(1, '\0').append(target(dep));
-  }
-  if (blob.size() > old.size()) {
-    for (const auto& dep : direct) {
-      dep.second->keep = true;
-    }
-    direct.clear();
-    neu = blob = RenderRunpath(runpath);
-  }
+  const auto [neu, blob] = FitRunpath(runpath, direct, old.size());
   if (blob != old) {
     if (const auto sym = SymbolInside(elf, sections, runpath_offset, runpath_offset + old.size())) {
       std::println(stderr, "{}: symbol '{}' shares bytes with RUNPATH (suffix-merged .dynstr, not lld?)", path.string(),
@@ -250,13 +297,13 @@ auto FixRunpath(FixupContext& ctx, const fs::path& path, BinaryImage& elf, const
       for (const std::uint64_t vn_file : dep.first->vn_files) {
         elf.Write<std::uint32_t>(vn_file, static_cast<std::uint32_t>(str));
       }
-      str += target(dep).size() + 1;
+      str += DirectTarget(dep).size() + 1;
     }
     dirty = true;
   }
   log.push_back("RUNPATH " + neu);
   for (const auto& dep : direct) {
-    log.push_back("NEEDED " + target(dep));
+    log.push_back("NEEDED " + DirectTarget(dep));
   }
   return true;
 }

@@ -1,5 +1,6 @@
 // Plain-assert unit tests for the pure parts of jig. Built and run by pkgs/ji/jig/bootstrap.nu
 // before the binary is installed; also: c++ -std=c++26 ... jig_test.cc <srcs> && ./a.out
+#include <elf.h>
 #include <stdlib.h>  // NOLINT(modernize-deprecated-headers): setenv is POSIX
 #include <unistd.h>
 
@@ -8,7 +9,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <initializer_list>
+#include <iterator>
 #include <optional>
 #include <print>
 #include <string>
@@ -19,6 +22,7 @@
 #include "base.h"
 #include "cache_client.h"
 #include "cc_mode.h"
+#include "dlopen_note.h"
 #include "driver.h"
 #include "fixup_mode.h"
 #include "gocache_mode.h"
@@ -782,6 +786,109 @@ void TestNixStore() {
                   R"a(["-c","echo \"hi\"\n"],[("a","2"),("b","1"),("out","/o")]))a");
 }
 
+// .note.dlopen read as ELF structures: from a relocatable object, a regular and a thin archive
+// member (link inputs), and a finished library (reloc-fixup); a link input's shared library is not
+// read, nor are notes of another owner
+namespace dlopen {
+constexpr std::uint32_t kType = 0x407c0c0a;
+constexpr size_t kNoteHeader = 12;  // namesz, descsz, type
+
+auto Note(std::string_view owner, std::uint32_t type, std::string_view json) -> std::string {
+  const auto pad = [](std::string text) -> std::string {
+    text.resize((text.size() + 3) / 4 * 4, '\0');
+    return text;
+  };
+  jig::BinaryImage head(std::string(kNoteHeader, '\0'));
+  assert(head.Write(0, static_cast<std::uint32_t>(owner.size() + 1)));
+  assert(head.Write(4, static_cast<std::uint32_t>(json.size() + 1)));
+  assert(head.Write(8, type));
+  return head.bytes() + pad(std::string(owner) + '\0') + pad(std::string(json) + '\0');
+}
+
+// header, .shstrtab, .note.dlopen, then the section table: null, .shstrtab, .note.dlopen
+auto Elf(std::uint16_t type, const std::string& notes) -> std::string {
+  const std::string names = std::string("\0.shstrtab\0.note.dlopen\0", 24);
+  const std::uint64_t names_at = sizeof(Elf64_Ehdr);
+  const std::uint64_t notes_at = names_at + names.size();
+  const std::uint64_t table_at = notes_at + notes.size();
+  Elf64_Ehdr ehdr{};
+  std::ranges::copy(std::string_view(ELFMAG, SELFMAG), std::begin(ehdr.e_ident));
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_DATA] = ELFDATA2LSB;
+  ehdr.e_type = type;
+  ehdr.e_shoff = table_at;
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = 3;
+  ehdr.e_shstrndx = 1;
+  jig::BinaryImage file(std::string(table_at + (3 * sizeof(Elf64_Shdr)), '\0'));
+  assert(file.Write(0, ehdr));
+  assert(file.Overwrite(names_at, names));
+  assert(file.Overwrite(notes_at, notes));
+  const auto shdr = [](std::uint32_t name, std::uint32_t type, std::uint64_t offset, std::uint64_t size) -> Elf64_Shdr {
+    Elf64_Shdr section{};
+    section.sh_name = name;
+    section.sh_type = type;
+    section.sh_offset = offset;
+    section.sh_size = size;
+    return section;
+  };
+  assert(file.Write(table_at + sizeof(Elf64_Shdr), shdr(1, SHT_STRTAB, names_at, names.size())));
+  assert(file.Write(table_at + (2 * sizeof(Elf64_Shdr)), shdr(11, SHT_NOTE, notes_at, notes.size())));
+  return file.bytes();
+}
+
+auto ArHeader(std::string_view name, std::uint64_t size) -> std::string {
+  return std::format("{:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n", name, "0", "0", "0", "644", size);
+}
+}  // namespace dlopen
+
+void TestDlopenNote() {
+  using dlopen::Note;
+  const std::string zlib = Note("FDO", dlopen::kType, R"([{"feature":"z","soname":["libz.so.1"]}])");
+  const std::string two = Note("FDO", dlopen::kType, R"([{"soname":["libz.so.1","libb.so.2"]},{"feature":"x"}])");
+  const std::string other = Note("GNU", dlopen::kType, R"([{"soname":["libno.so"]}])");
+  assert(jig::ParseDlopenNotes(zlib + other + two) == V({"libz.so.1", "libb.so.2"}));
+  assert(jig::ParseDlopenNotes(Note("FDO", 1, R"([{"soname":["libno.so"]}])")).empty());
+  assert(jig::ParseDlopenNotes(Note("FDO", dlopen::kType, "not json")).empty());
+  assert(jig::ParseDlopenNotes(zlib.substr(0, zlib.size() - 8)).empty());  // cut short
+  assert(jig::ParseDlopenNotes("").empty());
+
+  const std::string object = dlopen::Elf(ET_REL, zlib);
+  const std::string library = dlopen::Elf(ET_DYN, two);
+  assert(jig::ElfDlopenSonames(object) == V({"libz.so.1"}));
+  assert(jig::ElfDlopenSonames(library) == V({"libz.so.1", "libb.so.2"}));
+  assert(jig::ElfDlopenSonames(object.substr(0, 100)).empty());
+  assert(jig::ElfDlopenSonames("!<arch>\n").empty());
+
+  const fs::path dir = fs::temp_directory_path() / std::format("jig-dlopen-{}", ::getpid());
+  fs::create_directories(dir / "sub");
+  assert(WriteFile(dir / "sub/a.o", object));
+  assert(WriteFile(dir / "b.so", library));
+  assert(jig::LinkInputDlopenSonames(dir / "sub/a.o") == V({"libz.so.1"}));
+  assert(jig::LinkInputDlopenSonames(dir / "b.so").empty());
+  assert(jig::LinkInputDlopenSonames(dir / "missing.o").empty());
+  // a regular archive: a symbol table, a short-named member (odd size: padded), a long-named one
+  const std::string odd = object + "x";
+  const std::string longnames = "a-member-with-a-long-name.o/\n";  // odd: padded
+  const std::string archive = std::string("!<arch>\n") + dlopen::ArHeader("/", 4) + std::string(4, '\0') +
+                              dlopen::ArHeader("//", longnames.size()) + longnames + "\n" +
+                              dlopen::ArHeader("x.o/", odd.size()) + odd + "\n" +
+                              dlopen::ArHeader("/0", library.size()) + library;
+  assert(WriteFile(dir / "libr.a", archive));
+  assert(jig::LinkInputDlopenSonames(dir / "libr.a") == V({"libz.so.1"}));
+  const std::string ar_two = std::string("!<arch>\n") + dlopen::ArHeader("y.o/", object.size()) + object +
+                             dlopen::ArHeader("z.o/", 0) + dlopen::ArHeader("w.o/", 8) + "!<arch>\n";
+  assert(WriteFile(dir / "libs.a", ar_two));
+  assert(jig::LinkInputDlopenSonames(dir / "libs.a") == V({"libz.so.1"}));
+  // thin (meson's internal static libraries): the long-name table only, members beside it
+  const std::string thin_names = "sub/a.o/\n";  // odd: padded
+  const std::string thin = std::string("!<thin>\n") + dlopen::ArHeader("//", thin_names.size()) + thin_names + "\n" +
+                           dlopen::ArHeader("/0", object.size());
+  assert(WriteFile(dir / "libt.a", thin));
+  assert(jig::LinkInputDlopenSonames(dir / "libt.a") == V({"libz.so.1"}));
+  fs::remove_all(dir);
+}
+
 // JIG_PASSTHROUGH: only "1" is on; every other value (empty, 0, false, off, true) keeps the
 // driver policy. A c++ passthrough run keeps the language driver mode the conf's clang lacks
 void TestPassthrough() {
@@ -845,6 +952,7 @@ auto main() -> int {
   TestRustInvocation();
   TestGoCache();
   TestBinaryImage();
+  TestDlopenNote();
   TestMachOFixup();
   TestNixStore();
   TestPassthrough();

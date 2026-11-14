@@ -1,5 +1,6 @@
 # .note.dlopen: a soname a binary only dlopen()s is found through its RUNPATH, with no
-# LD_LIBRARY_PATH, from the store and from a moved copy of the closure
+# LD_LIBRARY_PATH, from the store and from a moved copy of the closure. The package passes no
+# -rpath: the builder puts the dirs there
 use checks.nu *
 use finish.nu [dlopen-check inventory]
 
@@ -29,6 +30,10 @@ assert $"dlopen finds libz from a moved closure, /nix/store hidden: ($out.stdout
 let selfbin = (if ($"($env.pkg)/bin/.dlself" | path exists) { $"($env.pkg)/bin/.dlself" } else { $"($env.pkg)/bin/dlself" })
 let self = (^env -i $selfbin | complete)
 assert $"dlopen finds the package's own library: ($self.stdout)($self.stderr)" ($self.exit_code == 0 and ($self.stdout | str starts-with "self 42"))
+# a library's own directory: a sibling it dlopen()s with no note
+let sibbin = (if ($"($env.pkg)/bin/.dlsib" | path exists) { $"($env.pkg)/bin/.dlsib" } else { $"($env.pkg)/bin/dlsib" })
+let sib = (^env -i $sibbin | complete)
+assert $"a library dlopen()s its sibling, no note: ($sib.stdout)($sib.stderr)" ($sib.exit_code == 0 and ($sib.stdout | str starts-with "sib 42"))
 # A bad own-library RUNPATH must fail. Moving the file alone does not do this: the checker maps
 # dest back to out. Replace lib with bad without changing the ELF string table's offsets.
 let root = $"($env.TMPDIR? | default /tmp)/dlopen-own"

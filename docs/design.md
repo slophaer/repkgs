@@ -150,7 +150,7 @@ reference scanner work unchanged.
 
 | reference | made relative by |
 |---|---|
-| ELF NEEDED / RUNPATH | jig links with RUNPATH for exactly the dirs that satisfied a `-l`. `reloc-fixup` rewrites in place: NEEDED becomes `$ORIGIN/…/libfoo.so.1` (one `open` per library), RUNPATH keeps libc and `dlopen` dirs |
+| ELF NEEDED / RUNPATH | jig links with RUNPATH for exactly the dirs that satisfied a `-l`, and those that hold a soname the link's objects name in `.note.dlopen`. `reloc-fixup` rewrites in place: NEEDED becomes `$ORIGIN/…/libfoo.so.1` (one `open` per library), RUNPATH keeps libc, `dlopen` dirs, and a library's own dir (siblings it `dlopen`s) |
 | Mach-O LC_LOAD_DYLIB | dependents record each dylib's absolute install name at link time (`-headerpad_max_install_names`), `reloc-fixup` respells them and store LC_RPATHs `@loader_path/…`, re-signs ad hoc |
 | PT_INTERP | the freestanding `crt-interp` entry stub maps ld.so relative to the executable; without `/proc`, it resolves symlinks in `AT_EXECFN` |
 | upstream binaries | `prebuilt = true`: formatelf implants the same stub and RUNPATH |

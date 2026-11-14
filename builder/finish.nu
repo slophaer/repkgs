@@ -229,11 +229,12 @@ def dlopen-sonames [path: string]: nothing -> list<string> {
 }
 
 # dlopen(3) of a bare soname searches the RUNPATH of the object that calls it (and no ld.so.cache
-# or LD_LIBRARY_PATH may be available). jig keeps a build-system -rpath dir that served no NEEDED, so a
-# package gets its .note.dlopen libraries' dirs by passing them (systemd: cc.ldflags). Checked
-# after reloc-fixup: every soname a file names in .note.dlopen that a dependency or the package's
-# own lib/ has must be in a dir of its final RUNPATH, else the build fails; one neither has is
-# optional (a note)
+# or LD_LIBRARY_PATH may be available). The builder puts the dirs there: jig's link adds the
+# dependency dir of each soname its objects name in .note.dlopen, reloc-fixup keeps a dir of the
+# package's own that the file names (pkgs/ji/jig/src/dlopen_note.h). Checked after reloc-fixup:
+# every soname a file names in .note.dlopen that a dependency or the package's own lib/ has must
+# be in a dir of its final RUNPATH, else the build fails; one neither has is optional (a note).
+# What the link cannot see (a one-step compile and link, LTO bitcode, -Wl,@file) needs -rpath
 export def dlopen-check [c: record, inv: table]: nothing -> nothing {
   let exports = (if $c.spec.exports? == false { {} } else { $c.spec.exports? | default {} })
   let own = ((["lib"] ++ ($exports.libDirs? | default [])) | uniq | each { $"($c.out)/($in)" })
@@ -260,7 +261,7 @@ export def dlopen-check [c: record, inv: table]: nothing -> nothing {
     }
   }
   if ($bad | is-not-empty) {
-    error make {msg: $".note.dlopen names libraries a dependency or the package's own lib/ has, but RUNPATH does not reach them \(pass -Wl,-rpath,<dir>\):\n($bad | str join "\n")"}
+    error make {msg: $".note.dlopen names libraries a dependency or the package's own lib/ has, but RUNPATH does not reach them \(the link saw no object that names them, or RUNPATH had no room: pass -Wl,-rpath,<dir>\):\n($bad | str join "\n")"}
   }
 }
 
