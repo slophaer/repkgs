@@ -38,6 +38,7 @@ lib.mergeAttrsList (map forPlatform platforms)
 // prefixed "builder-" (import ../tests/builder { inherit system; })
 // {
   elfutils = import ../tests/elfutils.nix { inherit system; };
+  openssl = import ../tests/openssl.nix { inherit system; };
   bootstrap-libc = import ../tests/bootstrap-libc.nix { inherit system; };
   sbom = import ../tests/sbom.nix { inherit system; };
   set = import ../tests/set.nix { inherit system; };

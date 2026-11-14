@@ -6,11 +6,13 @@
 }:
 package {
   name = "openssl";
-  # engines and providers next to the loaded libcrypto (reloc.h) instead of a configured libdir
+  # engines, providers and the default openssl.cnf (etc/ssl) next to the loaded libcrypto (reloc.h)
+  # instead of a configured libdir and OPENSSLDIR: no build reads the build machine's
+  # /etc/ssl/openssl.cnf. OPENSSL_CONF still wins
   patches = [ ./relocatable.patch ];
   cc.cflags = [ "-DOSSL_RELOCATABLE" ];
   uses = [ "make" ];
-  # --openssldir is the ambient path, not a store path
+  # --openssldir is the ambient path, not a store path: the machine's certificates (cert.pem, certs/)
   make.configureScript = "Configure";
   make.configureFlags = [
     platform.opensslTarget

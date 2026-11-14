@@ -70,3 +70,32 @@
  #else
      return MODULESDIR;
  #endif
+--- a/crypto/conf/conf_mod.c
++++ b/crypto/conf/conf_mod.c
+@@ -24,6 +24,11 @@
+ #include <openssl/engine.h>
+ #include "conf_local.h"
+ 
++/* the package's own openssl.cnf, next to the loaded libcrypto (OSSL_RELOCATABLE) */
++#if defined(OSSL_RELOCATABLE)
++#include <reloc.h>
++#endif
++
+ DEFINE_STACK_OF(CONF_MODULE)
+ DEFINE_STACK_OF(CONF_IMODULE)
+ 
+@@ -690,6 +695,14 @@
+     if ((file = ossl_safe_getenv("OPENSSL_CONF")) != NULL)
+         return OPENSSL_strdup(file);
+ 
++#if defined(OSSL_RELOCATABLE)
++    /*
++     * Not OPENSSLDIR/openssl.cnf: OPENSSLDIR is the machine's certificate store, and the
++     * configuration of the machine that builds with this OpenSSL is not this package's
++     */
++    return OPENSSL_strdup(RELOC("../etc/ssl/" OPENSSL_CONF));
++#endif
++
+     t = X509_get_default_cert_area();
+     /*
+      * On windows systems with -DOSSL_WINCTX set, if the needed registry
