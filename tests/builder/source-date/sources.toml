@@ -1,0 +1,4 @@
+# no [[source]]: package.nix gives the tree. The [pin] date is what the test is about
+[pin]
+version = "1"
+date = "2026-09-16"

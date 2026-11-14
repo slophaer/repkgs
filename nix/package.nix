@@ -644,6 +644,8 @@ let
     inherit (args) version;
     patches = args.patches or [ ];
     inherit spec;
+    # SOURCE_DATE_EPOCH (builder/env.nu): the [pin] date, or null for 1980-01-01
+    sourceDate = if sources == null then null else sources.date;
     buildDependencies = buildDeps {
       tests = if separate then [ ] else testDeps;
       base = if args.bootstrapTools or false then baseTools.bootstrap else baseTools.full;

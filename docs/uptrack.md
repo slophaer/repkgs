@@ -48,7 +48,7 @@ hash = "sha256-…"                  # tool; NAR hash of the unpacked tree (--st
 
 [pin]                              # tool
 version = "10.5.0"
-date = "2025-05-18"                # release date: libyear, `every`
+date = "2025-05-18"                # release date: libyear, `every`, the build's SOURCE_DATE_EPOCH (midnight UTC)
 sys = ["jemalloc"]                 # our libraries the lock files in the source can link (builder/sys-libs.nu). nix/package.nix adds those the set has as dependencies
 # file = "25.0.4.1_1"              # anything else a resolve hook returned. Every key here is a {key} in urls
 

@@ -15,11 +15,39 @@ def sandbox-dirs [a: record, out: string]: nothing -> record {
     CI: "true", TERM: "dumb", out: $out}
 }
 
-# no wall clock, locale, timezone or hash randomisation in outputs. 1980-01-01 is the earliest
-# mtime ZIP archives (wheels, jars) can store. clang derives __DATE__ from SOURCE_DATE_EPOCH
+# days from 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's days_from_civil)
+def days-from-civil [y: int, m: int, d: int]: nothing -> int {
+  let y = (if $m <= 2 { $y - 1 } else { $y })
+  let era = ($y // 400)
+  let yoe = $y - $era * 400
+  let doy = ((153 * (if $m > 2 { $m - 3 } else { $m + 9 }) + 2) // 5) + $d - 1
+  $era * 146097 + $yoe * 365 + ($yoe // 4) - ($yoe // 100) + $doy - 719468
+}
+
+# SOURCE_DATE_EPOCH: the [pin] date of sources.toml (YYYY-MM-DD) at midnight UTC, a fixed instant
+# of the source, so what a build stamps (clang's __DATE__, systemd's time-epoch, the kernel's
+# version string) is no older than the source. Never before 1980-01-01, the earliest mtime a ZIP
+# archive (wheel, jar) can store, which is also the value without a date
+export def source-date-epoch [date?: string]: nothing -> int {
+  const ZIP_EPOCH = 315532800
+  if $date == null { return $ZIP_EPOCH }
+  let p = ($date | parse -r '^(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})$')
+  if ($p | is-empty) { error make {msg: $"[pin] date ($date) is not YYYY-MM-DD"} }
+  let y = ($p.0.y | into int)
+  let m = ($p.0.m | into int)
+  let d = ($p.0.d | into int)
+  let leap = ($y mod 4 == 0 and ($y mod 100 != 0 or $y mod 400 == 0))
+  let len = (if $m >= 1 and $m <= 12 { [31 (if $leap { 29 } else { 28 }) 31 30 31 30 31 31 30 31 30 31] | get ($m - 1) } else { 0 })
+  if $d < 1 or $d > $len { error make {msg: $"[pin] date ($date) does not exist"} }
+  [((days-from-civil $y $m $d) * 86400) $ZIP_EPOCH] | math max
+}
+
+# no wall clock, locale, timezone or hash randomisation in outputs. clang derives __DATE__ from
+# SOURCE_DATE_EPOCH
 def reproducible [a: record]: nothing -> record {
-  {SOURCE_DATE_EPOCH: "315532800", TZ: "UTC", LC_ALL: "C.UTF-8", ZERO_AR_DATE: "1", PERL_HASH_SEED: "0"
-    PYTHONHASHSEED: "0", KBUILD_BUILD_TIMESTAMP: "@315532800", KBUILD_BUILD_USER: "pkgs", KBUILD_BUILD_HOST: "pkgs"
+  let epoch = (source-date-epoch $a.sourceDate?)
+  {SOURCE_DATE_EPOCH: ($epoch | into string), TZ: "UTC", LC_ALL: "C.UTF-8", ZERO_AR_DATE: "1", PERL_HASH_SEED: "0"
+    PYTHONHASHSEED: "0", KBUILD_BUILD_TIMESTAMP: $"@($epoch)", KBUILD_BUILD_USER: "pkgs", KBUILD_BUILD_HOST: "pkgs"
     CONFIG_SITE: $a.CONFIG_SITE}
 }
 

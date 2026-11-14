@@ -155,6 +155,8 @@ let
     in
     {
       inherit version tag fetch;
+      # [pin] date, YYYY-MM-DD: the source's SOURCE_DATE_EPOCH (builder/env.nu), or null
+      date = pinned.date or null;
       # our libraries the lock file links (builder/sys-libs.nu), written by uptrack
       sys = pinned.sys or [ ];
       has = key: byKey ? ${key};
