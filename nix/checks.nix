@@ -37,6 +37,7 @@ lib.mergeAttrsList (map forPlatform platforms)
 // prefixed "tests-" separateTests
 // prefixed "builder-" (import ../tests/builder { inherit system; })
 // {
+  openssl = import ../tests/openssl.nix { inherit system; };
   treefmt =
     pkgs.runCommand "treefmt-check"
       {

@@ -70,3 +70,37 @@
  #else
      return MODULESDIR;
  #endif
+--- a/crypto/conf/conf_mod.c
++++ b/crypto/conf/conf_mod.c
+@@ -24,6 +24,11 @@
+ #include <openssl/engine.h>
+ #include "conf_local.h"
+ 
++/* the package's own openssl.cnf, next to the loaded libcrypto (OSSL_RELOCATABLE) */
++#if defined(OSSL_RELOCATABLE)
++#include <reloc.h>
++#endif
++
+ DEFINE_STACK_OF(CONF_MODULE)
+ DEFINE_STACK_OF(CONF_IMODULE)
+ 
+@@ -713,6 +718,19 @@
+         return NULL;
+     BIO_snprintf(file, size, "%s%s%s", t, sep, OPENSSL_CONF);
+ 
++#if defined(OSSL_RELOCATABLE)
++    /* the machine's openssl.cnf when it has one, else the package's own */
++    {
++        FILE *f = fopen(file, "r");
++
++        if (f == NULL) {
++            OPENSSL_free(file);
++            return OPENSSL_strdup(RELOC("../etc/ssl/" OPENSSL_CONF));
++        }
++        fclose(f);
++    }
++#endif
++
+     return file;
+ }
+ 
