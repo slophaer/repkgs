@@ -37,6 +37,7 @@ lib.mergeAttrsList (map forPlatform platforms)
 // prefixed "tests-" separateTests
 // prefixed "builder-" (import ../tests/builder { inherit system; })
 // {
+  elfutils = import ../tests/elfutils.nix { inherit system; };
   treefmt =
     pkgs.runCommand "treefmt-check"
       {

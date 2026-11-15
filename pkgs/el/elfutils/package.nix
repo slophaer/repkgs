@@ -19,8 +19,12 @@ package {
     # is not relocatable. With nls off nothing reads it, so it goes where the man pages go
     "--localedir=/usr/share/locale"
     "--enable-deterministic-archives"
-    # the tree builds with -Werror and clang finds warnings gcc does not
-    "--disable-werror"
+  ];
+  # the tree builds with -Werror; clang flags const-discarding casts, and tests/varlocs.c sets a
+  # global it never reads (-Wunused-but-set-global)
+  cc.cflags = [
+    "-Wno-error=incompatible-pointer-types-discards-qualifiers"
+    "-Wno-error=unused-but-set-global"
   ];
   dependencies = [
     pkgs.zlib
@@ -43,8 +47,36 @@ package {
       open --raw $f | str replace -a $"($c.out)/bin/" '$(dirname "$0")/' | save -f $f
     '';
   };
-  bin = [ "eu-readelf" ];
-  # the suite runs the tools over its own fixtures and takes minutes
-  tests.run = false;
-  tests.version = "--version";
+  bin = [
+    "eu-addr2line"
+    "eu-ar"
+    "eu-elfclassify"
+    "eu-elfcmp"
+    "eu-elfcompress"
+    "eu-elflint"
+    "eu-findtextrel"
+    "eu-make-debug-archive"
+    "eu-nm"
+    "eu-objdump"
+    "eu-ranlib"
+    "eu-readelf"
+    "eu-size"
+    "eu-srcfiles"
+    "eu-stack"
+    "eu-strings"
+    "eu-strip"
+    "eu-unstrip"
+  ];
+  # Expected failures with an LLVM toolchain; an XPASS fails the build, so a fix shows up:
+  #  - elflint --gnu-ld checks GNU ld output and rejects lld's (".relro_padding has wrong type:
+  #    expected RELR, is NOBITS"); the strip and reverse-sections tests run elflint on the result
+  #  - arsymtest runs `$NM -s` (GNU nm's armap flag); llvm-nm's -s takes two arguments
+  #  - backtrace-data: the unwind stops at start_thread ("data: no main")
+  autotools.testTarget = [
+    "check"
+    "XFAIL_TESTS=run-elflint-self.sh run-strip-strmerge.sh run-reverse-sections-self.sh run-arsymtest.sh run-backtrace-data.sh"
+  ];
+  # run-readelf-compressed.sh compresses its fixture with the bzip2 program
+  tests.dependencies = [ buildPkgs.bzip2 ];
+  tests.version = "eu-readelf --version";
 }
