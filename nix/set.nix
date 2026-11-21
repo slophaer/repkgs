@@ -114,6 +114,16 @@ let
   mkShell = import ./mk-shell.nix {
     platform = plat;
     inherit (self) bash;
+    inherit (bootstrap) seed;
+    defaultBaseTools = with self; [
+      coreutils
+      findutils
+      diffutils
+      grep
+      sed
+      gawk
+      bash
+    ];
     inherit toolchain lib;
   };
 

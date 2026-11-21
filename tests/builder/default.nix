@@ -1,7 +1,8 @@
 # Builder behaviour: every directory here is a test. Its test.nu runs under the seed's nu with
 # builder/ and lib/ on the include path and $env.fixtures set to the directory. One with a
 # package.nix is first built as out-of-tree package test-<name> ($env.pkg, $env.debug), so each test
-# needs only its own toolchain. `nix-build tests/builder -A <name>`, `repkgs test` for all.
+# needs only its own toolchain. An env.nix, a function of the set, adds variables to the check.
+# `nix-build tests/builder -A <name>`, `repkgs test` for all.
 {
   system ? builtins.currentSystem,
   platform ? system,
@@ -63,5 +64,6 @@ mapAttrs (
       else
         { }
     )
+    // (if pathExists (dir + "/env.nix") then import (dir + "/env.nix") set else { })
   )
 ) tests

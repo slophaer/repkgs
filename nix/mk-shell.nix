@@ -1,21 +1,25 @@
 # A development shell made of this set's packages, for a flake that wants the tools without
-# nixpkgs' mkShell. `nix develop` never builds it: nix swaps the builder's arguments for its own
-# get-env.sh, builds that, and reads the environment back out. Two consequences shape the
-# derivation below.
+# nixpkgs' mkShell. Neither nix-shell (direnv's `use nix`) nor `nix develop` builds it: both
+# source `$stdenv/setup` and evaluate `shellHook`, `nix develop` after swapping the builder's
+# arguments for its own get-env.sh. Two consequences shape the derivation below.
 #
 #   - The builder must be called `bash`. develop.cc refuses anything else: "'nix develop' only
 #     works on derivations that use 'bash' as their builder". A nu builder, which every package
 #     of this set uses, cannot be entered.
-#   - Everything the shell offers is a plain environment variable here. There is no setup script
-#     and no stdenv, so PATH and the probe paths are written out rather than derived from
-#     buildInputs. get-env.sh sources `$stdenv/setup` only when `stdenv` is set, and it is not.
+#   - The search paths come from `$stdenv/setup`, a few exports, not from attributes: an
+#     attribute PATH would replace the caller's under nix-shell, and under --pure leave none.
+#     setup puts the shell's packages, then `baseTools`, before the caller's entries, as
+#     nixpkgs' stdenv does with its own: `nix-shell --pure` and `nix develop -i`, which keep none
+#     of the caller's, still have ls, rm and sh (and their own rc scripts work).
 #
-# `nix develop` prepends PATH to the caller's rather than replacing it, and evaluates
-# `shellHook` on entry.
+# `nix develop` prepends PATH to the caller's rather than replacing it.
 {
   platform,
   toolchain,
   bash,
+  seed,
+  # the set's base userland and bash: coreutils, findutils, grep, sed, ... but no compiler
+  defaultBaseTools,
   lib,
 }:
 {
@@ -28,13 +32,41 @@
   # more variables, and a script to evaluate on entry
   env ? { },
   shellHook ? "",
+  # on PATH after the packages, before the caller's. [ ] for the packages alone: `nix-shell
+  # --pure` and `nix develop -i` then miss rm, and their own rc scripts fail
+  baseTools ? defaultBaseTools,
 }:
 let
   all = packages ++ lib.on cc [ toolchain ];
-  under = sub: lib.join ":" (map (p: "${p}/${sub}") all);
+  under' = sub: ps: lib.join ":" (map (p: "${p}/${sub}") ps);
+  under = sub: under' sub all;
+  # VAR VALUE: VALUE, then what VAR held if anything. Nothing for no VALUE: an empty entry in
+  # PATH is the working directory
+  prepend = var: value: if value == "" then "" else "export ${var}=\"${value}\${${var}:+:\$${var}}\"";
+  setup = lib.join "\n" (
+    builtins.filter (l: l != "") [
+      # nix develop sources it in the build sandbox, where PATH is a placeholder
+      ''if [ "''${PATH:-}" = /path-not-set ]; then unset PATH; fi''
+      (prepend "PATH" (under' "bin" (all ++ baseTools)))
+      (prepend "PKG_CONFIG_PATH" (under "lib/pkgconfig"))
+      (prepend "CMAKE_PREFIX_PATH" (lib.join ":" (map toString all)))
+      # nix-shell runs shellHook through `runHook shellHook`, only when setup defines it
+      ''runHook() { eval "eval \"\''${$1:-}\""; }''
+    ]
+  );
+  stdenv = derivation {
+    name = "${name}-stdenv";
+    inherit (platform) system;
+    inherit setup;
+    builder = "${bash}/bin/bash";
+    args = [
+      "-c"
+      ''${seed}/bin/mkdir $out && printf '%s\n' "$setup" > $out/setup''
+    ];
+  };
   shell = derivation (
     {
-      inherit name shellHook;
+      inherit name shellHook stdenv;
       inherit (platform) system;
       # get-env.sh walks `$outputs` to find where to write, and nix puts that variable in the
       # environment only for a derivation that names its outputs. Without it the build writes
@@ -44,11 +76,8 @@ let
       # only reached by building the shell, which no one wants
       args = [
         "-c"
-        "echo 'this is a dev shell, enter it with `nix develop`' >&2; exit 1"
+        "echo 'this is a dev shell, enter it with `nix-shell` or `nix develop`' >&2; exit 1"
       ];
-      PATH = under "bin";
-      PKG_CONFIG_PATH = under "lib/pkgconfig";
-      CMAKE_PREFIX_PATH = lib.join ":" (map toString all);
     }
     // env
   );
@@ -66,6 +95,6 @@ shell
       "-c"
       ''printf '%s\n' $paths > $out''
     ];
-    paths = all;
+    paths = all ++ [ stdenv ];
   };
 }
