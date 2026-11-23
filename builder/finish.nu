@@ -298,9 +298,20 @@ def relocate [c: record, inv: table]: nothing -> nothing {
   if $c.platform.binfmt == "elf" { dlopen-check $c (inventory $c.out) }
 }
 
-# tests.version: a command whose output must contain the pinned version (true = --version), its
-# first word picks the binary. Run in place and from a copy of the closure under another root
-# (env -i), where an absolute store path would show. Under dlaudit: a failed dlopen is an error
+# `want` in `text` as a whole version: not glued to another one, so 1.2 is not in 11.2, 1.20 or
+# 1.2.3 (nor in 0.1.2). The version character before and after is a digit, or a dot with a digit
+# on its other side; a letter, "-", "+", a space or a sentence's last dot may touch it (v1.2,
+# go1.2, 1.2-rc1, "version 1.2."). The regex crate has no lookaround, so each side lists what may
+# touch it, and a failed try consumes nothing: a later whole match still counts
+export def version-found [text: string, want: string]: nothing -> bool {
+  let w = ($want | str replace -a -r '([\\.+*?()|\[\]{}^$])' '\$1')
+  $text =~ ([ '(?m)(?:^|[^0-9.]|[^0-9]\.|^\.)' $w '(?:$|[^0-9.]|\.[^0-9]|\.$)' ] | str join)
+}
+
+# tests.version: a command whose output must contain the pinned version as a whole (true =
+# --version), its first word picks the binary. Run in place and from a copy of the closure under
+# another root (env -i), where an absolute store path would show. Under dlaudit: a failed dlopen
+# is an error
 def version-check [c: record]: nothing -> nothing {
   let bins = (bins $c)
   let line = ($c.spec.tests?.version? | default ($bins | is-not-empty))
@@ -322,8 +333,10 @@ def version-check [c: record]: nothing -> nothing {
     # bzip2 --version goes on to compress stdin: stdout can be binary
     let keep = ($env | transpose k v | where k =~ '^(WINE|QEMU_)' | each { $"($in.k)=($in.v)" })
     let r = (^env -i $"HOME=($env.NIX_BUILD_TOP)" ...$keep ...($c.platform.emulator) ...$audit $"($root)/bin/($cmd.0)($c.platform.ext.exe)" ...($cmd | skip 1) | complete)
-    if $r.exit_code != 0 or not ($"($r.stdout)($r.stderr)" | str contains $want) {
-      error make {msg: $"version check: `($cmd | str join ' ')` did not print ($want) \(exit ($r.exit_code))\n($r.stdout)($r.stderr)"}
+    let printed = $"($r.stdout)($r.stderr)"
+    if $r.exit_code != 0 or not (version-found $printed $want) {
+      let part = (if ($printed | str contains $want) { ", found only as a part of another version" } else { "" })
+      error make {msg: $"version check: `($cmd | str join ' ')` did not print ($want) \(exit ($r.exit_code)($part))\n($printed)"}
     }
     let missed = (if ($audit_out | path exists) { open --raw $audit_out | lines | uniq | where { $in not-in ($c.spec.tests?.dlopen? | default []) } } else { [] })
     if ($missed | is-not-empty) {

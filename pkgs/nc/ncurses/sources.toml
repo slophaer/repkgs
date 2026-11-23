@@ -3,9 +3,9 @@ purl = "pkg:gnu/ncurses"
 
 [[source]]
 key = "default"
-url = "https://ftpmirror.gnu.org/ncurses/ncurses-{version}.tar.gz"
+url = "https://ftpmirror.gnu.org/ncurses/ncurses-{major}.{minor}.tar.gz"
 hash = "sha256-YpXsAx/jqbxBpTLljJBfLEyeG4vSY94K4HYHSqyXYyg="
 
 [pin]
-version = "6.6"
+version = "6.6.20251230"
 date = "2025-12-30"

@@ -167,10 +167,11 @@ Phases too long to keep inline can live in their own file: a phase `"rust.config
 prefix is no build system is `rust.nu` next to package.nix. pkgs/ru/rust does this.
 
 Every build ends the same way. ELF outputs are made relocatable. `bin/<name> --version` runs in
-an empty environment and has to print the pinned version. A `dlopen` that finds nothing during
-that run fails the build, unless `tests.dlopen = [ "libudev.so.1" ]` declares it optional.
-The run is repeated from a copy of the closure under another root. `tests.separate = true` puts
-the test phase in its own derivation.
+an empty environment and has to print the pinned version as a whole: `1.2` is not found in
+`11.2`, `1.20` or `1.2.3`, so the recipe's version is the one the program prints. A `dlopen`
+that finds nothing during that run fails the build, unless `tests.dlopen = [ "libudev.so.1" ]`
+declares it optional. The run is repeated from a copy of the closure under another root.
+`tests.separate = true` puts the test phase in its own derivation.
 
 Hardening and `-O2 -g` are compiler defaults, injected by the driver and not through `CFLAGS`.
 `cc.hardening.fortify = false` turns one off, `cc.cflags = [ "-DFOO" ]` (and `cxxflags`,

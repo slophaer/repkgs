@@ -3,8 +3,8 @@ purl = "pkg:gnu/bash"
 
 [[source]]
 key = "default"
-url = "https://ftp.gnu.org/gnu/bash/bash-{version}.tar.gz"
+url = "https://ftp.gnu.org/gnu/bash/bash-{major}.{minor}.tar.gz"
 hash = "sha256-yDRoQcHzXgMUcaxNq9WMezU6zwzZp4Z4T2oD2qyfHK4="
 
 [pin]
-version = "5.3"
+version = "5.3.0"
