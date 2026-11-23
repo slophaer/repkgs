@@ -2,6 +2,7 @@
 { package }:
 package {
   name = "unzip";
+  license = "Info-ZIP"; # LICENSE: the Info-ZIP license, version 2009-Jan-02
   # unix/Makefile
   platforms.posix = true;
   phases = [

@@ -6,6 +6,7 @@
 }:
 package {
   name = "zlib";
+  license = "Zlib"; # LICENSE and zlib.h: the zlib license
   uses = [ "cmake" ];
   cmake.tool = buildPkgs.cmake-bootstrap; # cmake links this
   cmake.defs = {

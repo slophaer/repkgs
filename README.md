@@ -130,6 +130,17 @@ commit; any other patch is the package's own. A package without sources.toml tel
 where its source is from: `upstream = { purl = "pkg:…"; }`, or `sourceOf = { package =
 pkgs.systemd; subpath = "hwdb.d"; }` when it builds from another package's source.
 
+`license = "Apache-2.0 OR MIT";` names the licence of the package's source as an SPDX expression
+(`MIT`, `GPL-3.0-or-later`, `GPL-2.0-only WITH Classpath-exception-2.0`, `LicenseRef-<x>` for one
+SPDX has no id for). The set exposes it as `pkgs.<name>.license`, null when the recipe says none,
+so `builtins.mapAttrs (_: p: p.license) set.pkgs` lists the licences without a build. Like
+`upstream` it is a record, not a build input: setting it changes no derivation. The key is
+optional. A wrong type, or a string that is not an expression (a lower-case `or`, a dangling
+`AND`, unbalanced brackets), is an error at evaluation; the ids are not checked against the SPDX
+list. A set that wants every recipe licensed checks `license != null` itself. A recipe in another
+repository writes the same key in its `package { … }` call, and `overrides.<name>.license.set =
+"MIT"` sets or corrects it from outside.
+
 `prefix = "/usr"` configures a fixed install prefix in autotools, Meson, CMake and make. They install
 through `DESTDIR` and copy that prefix's subtree to the package output. `meson.defs.prefix` and
 `cmake.defs.CMAKE_INSTALL_PREFIX` override the common field; configure and install use the same

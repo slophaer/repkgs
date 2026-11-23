@@ -6,6 +6,7 @@
 }:
 package {
   name = "ncurses";
+  license = "X11-distribute-modifications-variant"; # COPYING: the X11 text with "distribute with modifications"
   uses = [ "autotools" ];
   # default terminfo dir relative to libtinfo. A terminfo entry cannot name a file relative to
   # itself, so the few with init files keep upstream's /usr/share/tabset

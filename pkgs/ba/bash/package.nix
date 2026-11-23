@@ -3,6 +3,7 @@ package {
   # fork, signals, job control
   platforms.posix = true;
   name = "bash";
+  license = "GPL-3.0-or-later"; # COPYING is the GPL 3, the files say "version 3 or any later version"
   uses = [ "autotools" ];
   bootstrapTools = true;
   # locale dir, bashdb and the loadables kit relative to where bash is

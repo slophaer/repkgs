@@ -24,6 +24,9 @@ let
   # set.extend: the set again with more arguments
   extended = set.extend { overrides.oniguruma = flags "--x"; };
   reimported = setWith { overrides.oniguruma = flags "--x"; };
+  # `license`: an SPDX expression, read at evaluation, never a build input
+  withLicense = l: (setWith { overrides.jq.license.set = l; }).pkgs.jq;
+  licensed = setWith { packages.set-licensed = ./set-fixtures/licensed; };
 in
 # `bin` is the declared list after overrides, null when the package declares none
 assert pkgs.gnumake.bin == [ "make" ];
@@ -35,6 +38,67 @@ assert
   ];
 # reading it changes nothing in the derivation
 assert pkgs.gnumake.drvPath == (setWith { }).pkgs.gnumake.drvPath;
+# `license` is the SPDX expression the recipe writes, null when it writes none
+assert pkgs.bash.license == "GPL-3.0-or-later";
+assert pkgs.ripgrep.license == "Unlicense OR MIT";
+assert pkgs.jq.license == null;
+assert licensed.pkgs.set-licensed.license == "Apache-2.0 OR MIT";
+assert (withLicense "MIT").license == "MIT";
+# the key changes no derivation: each recipe that has one, without it (a recipe elsewhere says it
+# in its own package.nix, the same key), and a recipe that has none, with one
+assert builtins.all
+  (
+    n:
+    let
+      without = (setWith { overrides.${n}.license.remove = true; }).pkgs.${n};
+    in
+    without.license == null && drv without == drv pkgs.${n}
+  )
+  [
+    "bash"
+    "ncurses"
+    "unzip"
+    "zlib"
+    "ripgrep"
+  ];
+assert drv (withLicense "MIT") == drv pkgs.jq;
+assert drv (withLicense "Apache-2.0 OR MIT") == drv (withLicense "GPL-3.0-or-later");
+assert !(pkgs.bash.spec ? license);
+# what an expression may be: ids with `+`, AND, OR, WITH, brackets, LicenseRef-
+assert builtins.all (l: (withLicense l).license == l) [
+  "MIT"
+  "Apache-2.0 OR MIT"
+  "GPL-3.0-or-later"
+  "Apache-2.0+"
+  "GPL-2.0-only WITH Classpath-exception-2.0"
+  "(MIT OR Apache-2.0) AND Zlib"
+  "((MIT))"
+  "LicenseRef-vendor-1.0"
+  "DocumentRef-spdx-tool-1.2:LicenseRef-MyLicense"
+];
+# and what it may not: another type, an empty string, a dangling or doubled operator, a lower-case
+# operator, a space inside an id, unbalanced brackets, a character no id has
+assert builtins.all (l: fails (withLicense l).license) [
+  1
+  true
+  null
+  [ "MIT" ]
+  { id = "MIT"; }
+  ""
+  " "
+  "MIT AND"
+  "OR MIT"
+  "MIT OR OR Apache-2.0"
+  "MIT Apache-2.0"
+  "MIT or Apache-2.0"
+  "GNU GPL"
+  "(MIT OR Apache-2.0"
+  "MIT)"
+  "MIT/Apache-2.0"
+  "MIT, Apache-2.0"
+  "MIT WITH"
+  "()"
+];
 # a package named like an alias is an error, not silently replaced by the alias
 assert fails (builtins.attrNames aliased.pkgs);
 assert (setWith { packages.set-plain = ./set-fixtures/plain; }).pkgs.set-plain.pname == "set-plain";

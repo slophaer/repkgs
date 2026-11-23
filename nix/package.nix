@@ -31,11 +31,13 @@ let
     all
     any
     attrNames
+    bitAnd
     concatMap
     elem
     elemAt
     filter
     foldl'
+    genList
     head
     hasContext
     isAttrs
@@ -44,6 +46,8 @@ let
     length
     listToAttrs
     match
+    split
+    typeOf
     ;
 
   # the builder modules every script imports: one string for the set
@@ -82,6 +86,7 @@ let
     "stagedRoots"
     "upstream"
     "sourceOf"
+    "license"
   ];
 
   # the part of every derivation that is the same across the set: built once
@@ -394,6 +399,42 @@ let
       "sourceOf: want { package = pkgs.<name>; subpath? = \"<relative path, no . or ..>\"; }"
     else
       null;
+  # `license`: an SPDX licence expression, the licence of the package's source. Only its syntax is
+  # checked, not the ids against the SPDX list: ids joined by AND, OR and WITH (upper case),
+  # brackets, `+` after an id, LicenseRef-<x>. Not a build input: the derivation does not see it
+  licenseError =
+    let
+      l = args.license;
+      tokens = filter (t: isString t && t != "") (split "[ ()]+" l);
+      isId =
+        t:
+        match "[A-Za-z0-9.-]+[+]?|(DocumentRef-[A-Za-z0-9.-]+:)?LicenseRef-[A-Za-z0-9.-]+" t != null
+        && !elem t [
+          "AND"
+          "OR"
+          "WITH"
+        ];
+      isOp =
+        t:
+        elem t [
+          "AND"
+          "OR"
+          "WITH"
+        ];
+      # id (operator id)*: an id at each even place, an operator at each odd one, an id last
+      shaped =
+        bitAnd (length tokens) 1 == 1
+        && all (i: (if bitAnd i 1 == 0 then isId else isOp) (elemAt tokens i)) (
+          genList (i: i) (length tokens)
+        );
+      count = c: length (filter isList (split c l));
+    in
+    if !isString l then
+      "license: want an SPDX licence expression as a string, got ${typeOf l}"
+    else if match "[A-Za-z0-9.:+() -]+" l == null || !shaped || count "[(]" != count "[)]" then
+      "license: ${builtins.toJSON l} is not an SPDX licence expression (ids joined by AND, OR, WITH in upper case, brackets allowed)"
+    else
+      null;
   checks =
     if badFeatures != [ ] then
       fail "features ${toString badFeatures}: want { default (bool, string, list or int), values? (a list the default is from), doc? }"
@@ -407,6 +448,8 @@ let
       fail (join "; " wrongPlatform)
     else if originError != null then
       fail originError
+    else if args ? license && licenseError != null then
+      fail licenseError
     else
       true;
 
@@ -608,6 +651,7 @@ let
       # SBOM records, not build input
       "upstream"
       "sourceOf"
+      "license"
     ]
     // (if args ? tests then { tests = removeAttrs args.tests [ "dependencies" ]; } else { })
     // listToAttrs (
@@ -696,6 +740,8 @@ drv
   # the programs it declares (`bin`, after overrides; finish.nu runs each with --version), or null.
   # What bin/ holds is known only after the build (exports.json)
   bin = args.bin or null;
+  # the SPDX expression of the source's licence (`license`), or null
+  license = args.license or null;
   sources = sources0;
   decl = args0.features or { };
   inherit dir features fn;
